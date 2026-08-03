@@ -27,6 +27,7 @@ AI for Industry Challenge는 시뮬레이션 환경에서 UR5e 로봇 팔이 케
 | `ws_aic/data/` | 로컬 데이터셋 기본 출력 위치, Git 추적 제외 |
 | `ws_aic/model/` | 로컬 모델 파일 위치, Git 추적 제외 |
 | `docs/git-conventions.md` | 브랜치 및 커밋 메시지 규칙 |
+| `readme/gif/`, `readme/photo/` | README에 사용할 영상 및 이미지 자산 |
 
 ## 요구사항
 
