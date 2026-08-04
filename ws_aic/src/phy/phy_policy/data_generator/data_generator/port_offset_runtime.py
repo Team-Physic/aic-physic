@@ -240,12 +240,13 @@ def _select_cable_tip_frame(self, task: Task) -> str:
     )
     return fallback_frame
 
-def set_pose_target(self, move_robot, pose, stiffness=None, damping=None):
-    """주어진 목표 pose와 impedance 값으로 controller에 MotionUpdate 명령을 보낸다."""
+def set_pose_target(self, move_robot, pose, stiffness=None, damping=None) -> int:
+    """controller에 MotionUpdate를 보내고 명령 발행 ROS 시각(ns)을 반환한다."""
     _s = stiffness if stiffness is not None else STIFFNESS_DEFAULT
     _d = damping if damping is not None else DAMPING_DEFAULT
+    command_stamp = self.get_clock().now().to_msg()
     mu = MotionUpdate(
-        header=Header(frame_id="base_link", stamp=self.get_clock().now().to_msg()),
+        header=Header(frame_id="base_link", stamp=command_stamp),
         pose=pose, target_stiffness=np.diag(_s).flatten(), target_damping=np.diag(_d).flatten(),
         feedforward_wrench_at_tip=Wrench(force=Vector3(x=0.0, y=0.0, z=0.0), torque=Vector3(x=0.0, y=0.0, z=0.0)),
         wrench_feedback_gains_at_tip=[0.5, 0.5, 0.5, 0.0, 0.0, 0.0],
@@ -253,3 +254,4 @@ def set_pose_target(self, move_robot, pose, stiffness=None, damping=None):
     )
     try: move_robot(motion_update=mu)
     except Exception: pass
+    return int(command_stamp.sec) * 1_000_000_000 + int(command_stamp.nanosec)

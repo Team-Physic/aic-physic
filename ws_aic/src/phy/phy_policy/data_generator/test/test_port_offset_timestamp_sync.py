@@ -189,6 +189,36 @@ def test_wait_selects_next_synchronized_observation() -> None:
     assert "observation" in metadata["wait_ns"]
 
 
+def test_wait_rejects_cached_observation_from_before_command() -> None:
+    """동기화된 frame이어도 현재 명령보다 오래됐으면 다음 frame을 기다린다."""
+    policy = _policy()
+    policy.collect_sync_wait_timeout_sec = 0.1
+    policy.collect_sync_poll_sec = 0.001
+    policy._observation_sync_metadata = lambda obs: _observation_sync_metadata(
+        policy,
+        obs,
+    )
+    policy._collect_log_text = lambda message, _color: message
+    policy.get_logger = lambda: SimpleNamespace(info=lambda _message: None)
+    policy.sleep_for = lambda _seconds: None
+    observations = iter(
+        [
+            _observation(2_000_000_000, 2_010_000_000, 2_020_000_000, 2_015_000_000),
+            _observation(3_000_000_000, 3_010_000_000, 3_020_000_000, 3_015_000_000),
+        ]
+    )
+
+    observation, metadata = _wait_for_synchronized_observation(
+        policy,
+        lambda: next(observations),
+        min_capture_stamp_ns=2_500_000_000,
+    )
+
+    assert observation is not None
+    assert metadata["capture_stamp_ns"] == 3_010_000_000
+    assert metadata["sync_valid"] is True
+
+
 def test_time_difference_log_uses_milliseconds() -> None:
     """사용자 로그에는 각 source의 시각 차이를 ms 단위로 표시한다."""
     text = _time_difference_text(

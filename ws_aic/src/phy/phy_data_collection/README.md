@@ -190,6 +190,7 @@ trial 시작:
   port_tf_snapshot = latest(base_link <- port entrance)
 
 저장 조건:
+  command_stamp < capture_stamp
   camera_time_difference <= sync_tolerance
   controller_time_difference <= sync_tolerance
   dynamic plug TF time_difference <= sync_tolerance
@@ -197,14 +198,14 @@ trial 시작:
 
 timeout이나 허용 오차를 넘긴 sample은 JPEG, 카메라별 sample metadata JSON 및 `metadata.jsonl`을 쓰지 않고 저장 count도 증가시키지 않습니다.
 
-카메라별 sample metadata JSON과 `metadata.jsonl`의 `timestamps`에는 `capture_stamp_ns`, camera별 stamp, `controller_stamp_ns`, port/plug TF stamp, `is_static_snapshot`, `skew_ns`, `wait_ns`, `sync_tolerance_ns`, `sync_valid`, `dataset_write_stamp_ns`가 기록되며 모든 시각 값의 단위는 `ns`입니다. 호환성을 위해 유지하는 `skew_ns`는 source 사이의 최대 시각 차이를 `ns` 단위로 저장하는 필드입니다.
+카메라별 sample metadata JSON과 `metadata.jsonl`의 `timestamps`에는 `command_stamp_ns`, `capture_stamp_ns`, `command_to_capture_ns`, camera별 stamp, `controller_stamp_ns`, port/plug TF stamp, `is_static_snapshot`, `skew_ns`, `wait_ns`, `sync_tolerance_ns`, `sync_valid`, `dataset_write_stamp_ns`가 기록되며 모든 시각 값의 단위는 `ns`입니다. `command_to_capture_ns`는 명령 발행부터 저장 대상으로 선택된 center camera frame까지의 간격이며, 로봇이 목표에 도달한 시간 자체를 뜻하지는 않습니다. 호환성을 위해 유지하는 `skew_ns`는 source 사이의 최대 시각 차이를 `ns` 단위로 저장하는 필드입니다.
 
 | 함수 | 현재 역할 |
 |---|---|
 | `_add_sync_args()` / `_policy_environment()` | 허용 오차·대기 timeout·색상 설정을 policy 환경변수로 전달합니다. |
 | `init_runtime()` | 허용 오차와 최대 대기시간을 초기화합니다. |
 | `insert_cable()` / `_lookup_latest_transform_stamped()` | trial 시작 시 고정 포트 TF를 한 번 snapshot합니다. |
-| `_wait_for_synchronized_observation()` | timeout 동안 Image/ControllerState 조건을 만족하는 Observation을 선택합니다. |
+| `_wait_for_synchronized_observation()` | timeout 동안 현재 명령보다 새로운 Image/ControllerState 중 시각 조건을 만족하는 Observation을 선택합니다. |
 | `_lookup_transform_at()` / `_tf_sync_metadata()` | 메인 TF2 buffer에서 center image 시각의 동적 plug TF를 한 번 조회하고 port snapshot과 함께 metadata를 검증합니다. |
 | `_stage_collect()` | 정지 속도 판정 없이 수집 시각 일치 조건을 통과한 sample만 저장기로 전달합니다. |
 | `_save_xyz_rpy_sample()` | 이미지·label·timestamp metadata가 모두 기록된 뒤에만 count를 증가시키고 성공 여부와 이유를 반환합니다. |

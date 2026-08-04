@@ -38,7 +38,7 @@ def _write_rpy_data_yaml(self) -> None:
                 "  location: measured plug reference offset from port entrance in base_link",
                 "  label: base_link correction from plug reference to port entrance alignment",
                 "  collect: commanded port-local dx/dy/dz + roll/pitch/yaw sample",
-                "  timestamps: source ROS 시각과 source 간 최대 시각 차이 및 허용 오차",
+                "  timestamps: 명령 발행·capture·source ROS 시각, 명령→capture 간격, source 간 최대 시각 차이와 허용 오차",
                 "  image: 수집 시각 일치 조건을 통과한 camera image",
                 "",
             ]

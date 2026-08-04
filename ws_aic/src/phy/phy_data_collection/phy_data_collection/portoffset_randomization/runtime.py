@@ -18,6 +18,7 @@ import yaml
 
 from .constants import (
     ANSI_COLORS,
+    DATA_GENERATOR_PACKAGE_ROOT,
     DATASET_ROOT,
     EPISODE_TRACKING_DIR,
     PIXI_WS,
@@ -309,6 +310,10 @@ def _policy_environment(
 ) -> dict[str, str]:
     """PortOffsetCollect가 사용할 ROS 2 및 데이터 수집 환경변수를 구성한다."""
     env = os.environ.copy()
+    python_paths = [str(DATA_GENERATOR_PACKAGE_ROOT)]
+    if env.get("PYTHONPATH"):
+        python_paths.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(python_paths)
     env["AIC_SCENARIO_PARAMS_FILE"] = str(scenario_params_path)
     env["AIC_CAPTURE_DIR"] = str(EPISODE_TRACKING_DIR)
     env["AIC_STOP_FILE"] = str(stop_file)

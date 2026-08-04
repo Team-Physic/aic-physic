@@ -54,6 +54,7 @@ def _capture_failure_reason(reason: str) -> str:
         "controller_time_difference_exceeded": (
             "ControllerState와 center camera의 시각 차이가 허용 범위를 초과함"
         ),
+        "capture_not_after_command": "center camera frame이 현재 명령보다 새롭지 않음",
         "tf_time_difference_exceeded": (
             "plug TF와 center camera의 시각 차이가 허용 범위를 초과함"
         ),
@@ -217,15 +218,22 @@ def _stage_collect(
                 f"{extras['collect_local_yaw_deg']:+.2f})deg"
             )
 
-            self.set_pose_target(
+            command_stamp_ns = self.set_pose_target(
                 move_robot,
                 pose,
                 stiffness=ctx["collect_stiffness"],
                 damping=ctx["collect_damping"],
             )
             save_obs, timestamps = self._wait_for_synchronized_observation(
-                get_observation
+                get_observation,
+                min_capture_stamp_ns=command_stamp_ns,
             )
+            timestamps["command_stamp_ns"] = int(command_stamp_ns)
+            capture_stamp_ns = timestamps.get("capture_stamp_ns")
+            if capture_stamp_ns is not None:
+                timestamps["command_to_capture_ns"] = (
+                    int(capture_stamp_ns) - int(command_stamp_ns)
+                )
             if save_obs is None:
                 self.get_logger().error(
                     self._collect_log_text(

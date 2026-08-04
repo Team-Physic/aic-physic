@@ -167,22 +167,25 @@ def _observation_sync_metadata(self, obs) -> tuple[bool, dict[str, Any]]:
     return True, timestamps
 
 def _wait_for_synchronized_observation(
-    self,
-    get_observation,
+    self, get_observation,
+    min_capture_stamp_ns: int | None = None,
 ) -> tuple[Any | None, dict[str, Any]]:
-    """허용 오차를 만족하는 새 Observation을 제한 시간 동안 순차 대기한다."""
+    """허용 오차와 최소 capture 시각을 만족하는 Observation을 순차 대기한다."""
     start_ns = time.monotonic_ns()
     timeout_ns = int(self.collect_sync_wait_timeout_sec * 1_000_000_000)
     deadline_ns = start_ns + timeout_ns
     waiting_logged = False
-    timestamps: dict[str, Any] = {
-        "sync_valid": False,
-        "rejection_reason": "missing_observation",
-    }
+    timestamps: dict[str, Any] = {"sync_valid": False, "rejection_reason": "missing_observation"}
 
     while True:
         obs = get_observation()
         sync_valid, timestamps = self._observation_sync_metadata(obs)
+        capture_stamp_ns = timestamps.get("capture_stamp_ns")
+        if sync_valid and min_capture_stamp_ns is not None and capture_stamp_ns is not None:
+            sync_valid = int(capture_stamp_ns) > int(min_capture_stamp_ns)
+            if not sync_valid:
+                timestamps["sync_valid"] = False
+                timestamps["rejection_reason"] = "capture_not_after_command"
         now_ns = time.monotonic_ns()
         timestamps.setdefault("wait_ns", {})["observation"] = now_ns - start_ns
         if sync_valid:
