@@ -1,0 +1,40 @@
+# Local agent instructions
+AGENTS.md
+
+# Python environments and caches
+.venv/
+venv/
+env/
+.nvidia-compat/
+**/.pixi/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+**/.pytest_cache/
+**/.mypy_cache/
+
+# Editor settings
+**/.vscode/
+
+# Model weights and generated outputs
+*.pt
+**/weight/
+**/output/
+**/outputs/
+**/debug/
+**/rosbags/
+paper/
+
+# ROS workspace artifacts and local datasets
+ws_aic/data/
+ws_aic/model/
+ws_aic/notebook/
+ws_aic/build/
+ws_aic/install/
+ws_aic/log/
+ws_aic/src/data/
+ws_aic/src/model/
+ws_aic/src/build/
+ws_aic/src/install/
+ws_aic/src/log/
+ws_aic/src/phy/data/
