@@ -9,7 +9,7 @@ from phy_data_collection.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 WS_SRC = ROOT / "ws_aic" / "src"
-PIXI_WS = WS_SRC / "aic"
+PIXI_WS = WS_SRC
 DATA_GENERATOR_PACKAGE_ROOT = WS_SRC / "phy" / "phy_policy" / "data_generator"
 DATASET_ROOT = ROOT / "ws_aic" / "data" / "phy_portoffset_randomization"
 ROSBAG_ROOT = ROOT / "rosbags" / "portoffset"

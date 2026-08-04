@@ -47,6 +47,8 @@ pyspacemouse = ">=2.0.0, <3"
 
 [feature.phy.dependencies]
 pyyaml = ">=6,<7"
+ros-kilted-data-generator = { path = "phy/phy_policy/data_generator" }
+ros-kilted-phy-data-collection = { path = "phy/phy_data_collection" }
 ros-kilted-ros2bag = "*"
 ros-kilted-rosbag2-storage-sqlite3 = "*"
 

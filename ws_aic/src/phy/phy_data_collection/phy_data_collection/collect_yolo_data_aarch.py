@@ -28,7 +28,7 @@ Classes:
   3: sc_port_tip
 
 사용법:
-  cd ~/aic-physic/ws_aic/src/aic
+  cd ~/aic-physic/ws_aic/src
   ros2 run phy_data_collection collect_yolo_data_aarch --sets 10
   ros2 run phy_data_collection collect_yolo_data_aarch --sets 20 --snapshots 30 --diversify --headless
 """
@@ -129,7 +129,7 @@ SCENARIOS_PER_SET = [
 # 경로 설정
 # ──────────────────────────────────────────
 ROOT                 = PROJECT_ROOT
-PIXI_WS              = ROOT / "ws_aic" / "src" / "aic"
+PIXI_WS              = ROOT / "ws_aic" / "src"
 DEFAULT_OUTPUT_DIR   = ROOT / "ws_aic" / "src" / "data" / "yolo"
 DEFAULT_SCENARIO_DIR = Path("/tmp/aic_scenario_params")
 ENGINE_CONFIG_TMP    = Path("/tmp/aic_yolo_config.yaml")

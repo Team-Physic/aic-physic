@@ -75,7 +75,7 @@ TASK_TIME_LIMIT   = 600  # 데이터 저장까지 포함한 task별 최대 실�
 ROOT = PROJECT_ROOT
 
 WS_SRC               = ROOT / "ws_aic" / "src"
-PIXI_WS              = ROOT / "ws_aic" / "src" / "aic"
+PIXI_WS              = ROOT / "ws_aic" / "src"
 YOLO_MODEL_DEFAULT   = WS_SRC / "model" / "ais_yolo-2" / "weights" / "best.pt"
 ENGINE_CONFIG_TMP    = Path("/tmp/aic_custom_config.yaml")
 SCENARIO_PARAMS_TMP  = Path("/tmp/aic_scenario_params.json")

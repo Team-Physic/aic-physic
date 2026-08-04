@@ -27,7 +27,7 @@ source install/setup.bash
 
 랜덤화된 task board/cable/lighting 조건에서 `data_generator.PortOffsetCollect` policy를 실행해 vision-offset 정렬 학습 데이터를 수집한다.
 
-명령은 `ws_aic/src`에서 실행하며, runner는 Distrobox와 host Pixi policy의 내부 작업 디렉터리를 `ws_aic/src/aic`으로 고정한다. 따라서 호출한 shell의 현재 디렉터리와 관계없이 AIC package와 asset 탐색 기준이 일치한다.
+명령은 `ws_aic/src`에서 실행하며, runner도 host Pixi workspace의 작업 디렉터리를 `ws_aic/src`로 고정한다. AIC package와 asset은 그 아래 `aic` 디렉터리에서 찾는다.
 
 ```bash
 pixi run ros2 run phy_data_collection collect_portoffset_randomization_data \
@@ -398,7 +398,7 @@ ros2 run phy_data_collection collect_yolo_data_aarch --sets 10 --output ~/data/y
 plot은 `phy_data_collection.portoffset_randomization.constants.LIMITS`와 수집 CLI의 현재 기본값을 직접 읽어 Task Board, target port 및 조명 분포를 그립니다.
 
 ```bash
-cd ws_aic/src/aic
+cd ws_aic/src
 pixi run ros2 run phy_data_collection plot_scenario_randomization
 ```
 
