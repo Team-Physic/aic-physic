@@ -6,24 +6,30 @@ AI for Industry Challenge는 시뮬레이션 환경에서 UR5e 로봇 팔이 케
 포트에 삽입하는 산업 자동화 태스크입니다. 참가자는 카메라 관측, 로봇 상태,
 힘/토크 센서 정보를 이용해 포트 위치와 자세를 추정하고 삽입 정책을 구현합니다.
 
-현재 이 저장소에는 공식 AIC Toolkit과, 포트 주변의 XYZ/RPY offset 학습 데이터를
-수집하는 `PortOffsetCollect` 정책이 포함되어 있습니다.
+현재 이 저장소에는 공식 AIC Toolkit 소스와, 거리 구간별 img2pos 학습 데이터를 자동
+수집하는 세 정책 및 공통 runner가 포함되어 있습니다.
 
 ## 주요 기능
 
-- 포트 기준 XYZ/RPY offset을 계층화 샘플링해 로봇 목표 자세 생성
+- 보드 전경, 포트 하강, 포트 근접의 세 수집 정책 선택
+- 거리·횡방향 위치·카메라 각도의 stratified random sampling
+- 근접 정책에서 50/10/5/2mm tier별 XYZ/RPY offset 집중 샘플링
+- plug와 port 사이에 기본 20mm 안전거리를 유지해 접촉 없이 촬영
+- controller reference와 실제 TCP 움직임 수렴 뒤 timestamp가 일치하는 카메라 frame 저장
 - 좌·중앙·우 카메라와 controller state의 ROS timestamp 동기화 검사
-- 캡처 시점의 TF를 조회해 영상과 ground-truth label의 시각 일치 보장
+- 동일 촬영시각의 카메라 image들을 한 capture로 묶고 해당 시점 TF로 단일 label 계산
 - 포트가 기본 2개 이상의 카메라에 보이는 sample만 저장
-- train/validation 분할과 카메라별 이미지·JSON metadata 생성
+- trial 단위 train/validation/test 분할과 compact JPEG·JSONL 생성
+- 독립 Zenoh/Gazebo partition을 사용한 headless 병렬 수집
 - 선택적 Hugging Face Dataset 업로드
 
 ## 저장소 구조
 
 | 경로 | 역할 |
 | --- | --- |
-| `ws_aic/src/aic/` | 공식 [`intrinsic-dev/aic`](https://github.com/intrinsic-dev/aic) 서브모듈 |
-| `ws_aic/src/phy/phy_policy/data_generator/` | `PortOffsetCollect` 데이터 수집 정책 |
+| `ws_aic/src/aic/` | 저장소에 포함된 공식 [`intrinsic-dev/aic`](https://github.com/intrinsic-dev/aic) Toolkit 소스 |
+| `ws_aic/src/phy/phy_policy/` | 공식 example policy 형식을 따르는 Team Physic 정책 패키지 |
+| `ws_aic/src/phy/phy_data_collection/` | randomized trial·rosbag·policy lifecycle runner |
 | `ws_aic/data/` | 로컬 데이터셋 기본 출력 위치, Git 추적 제외 |
 | `ws_aic/model/` | 로컬 모델 파일 위치, Git 추적 제외 |
 | `docs/git-conventions.md` | 브랜치 및 커밋 메시지 규칙 |
@@ -47,25 +53,21 @@ AI for Industry Challenge는 시뮬레이션 환경에서 UR5e 로봇 팔이 케
 
 ## 환경 설정
 
-### 1. 저장소와 공식 Toolkit 받기
+### 1. 저장소 받기
 
 ```bash
-git clone --recurse-submodules \
-  https://github.com/Team-Physic/aic-physic.git
+git clone https://github.com/Team-Physic/aic-physic.git
 cd aic-physic
 ```
 
-이미 서브모듈 없이 clone했다면 다음 명령으로 공식 Toolkit을 받습니다.
-
-```bash
-git submodule update --init --recursive
-```
+공식 Toolkit 소스는 `ws_aic/src/aic/`에 함께 포함되어 있어 별도 submodule 초기화가
+필요하지 않습니다.
 
 ### 2. Pixi 환경 설치
 
 ```bash
 pixi self-update --version 0.67.2
-cd ws_aic/src/aic
+cd ws_aic/src
 pixi install --frozen
 ```
 
@@ -84,85 +86,70 @@ GPU를 사용하지 않는 환경에서는 `--nvidia`를 제거합니다.
 
 ## 데이터 수집 실행
 
-`PortOffsetCollect`는 ground-truth TF를 이용하므로 eval 환경에서
-`ground_truth:=true`가 필요합니다.
-
-### Terminal 1: 시뮬레이터와 평가 엔진
+runner가 randomized config/world를 만들고 `ground_truth:=true` simulator, 선택적
+rosbag, 선택한 collection policy를 순서대로 시작하고 종료합니다.
 
 ```bash
-export DBX_CONTAINER_MANAGER=docker
+cd aic-physic/ws_aic/src
 
-distrobox enter -r aic_eval_physic -- /entrypoint.sh \
-  ground_truth:=true \
-  start_aic_engine:=true
+PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
+  collect_portoffset_randomization_data \
+  --collection-policy near-port \
+  --port-type sfp \
+  --trials 34 \
+  --workers 2 \
+  --samples-per-trial 40 \
+  --dataset-version img2pos-v1 \
+  --push-to-hub false
 ```
 
-### Terminal 2: 데이터 수집 정책
-
-```bash
-cd aic-physic/ws_aic/src/aic
-
-export PYTHONPATH="$PWD/../phy/phy_policy/data_generator${PYTHONPATH:+:$PYTHONPATH}"
-export AIC_RPY_DATASET_VERSION=trial-001
-export AIC_VISION_OFFSET_PUSH_TO_HUB=0
-
-pixi run --frozen ros2 run aic_model aic_model \
-  --ros-args \
-  -p use_sim_time:=true \
-  -p policy:=data_generator.PortOffsetCollect
-```
-
-로컬 수집만 할 때는 의도하지 않은 외부 업로드를 막기 위해
-`AIC_VISION_OFFSET_PUSH_TO_HUB=0`을 명시하는 것을 권장합니다.
+전체 CLI와 데이터 형식은
+[`phy_data_collection/README.md`](ws_aic/src/phy/phy_data_collection/README.md)를
+참고하십시오.
 
 ## 주요 환경변수
 
 | 환경변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `AIC_COLLECT_STEPS` | `1000` | trial당 offset sample 수 |
-| `AIC_RPY_DATASET_VERSION` | 빈 문자열 | 데이터셋 하위 버전 디렉터리 |
-| `AIC_VISION_OFFSET_DATASET_DIR` | `ws_aic/data/phy_rpy_randomization[/<version>]` | 데이터셋 출력 위치 |
-| `AIC_RPY_MIN_VISIBLE_CAMERAS` | `2` | 저장에 필요한 최소 카메라 수 |
-| `AIC_RPY_VISIBILITY_MARGIN_PX` | `64.0` | 영상 경계로부터 필요한 여백 |
+| `AIC_COLLECT_STEPS` | runner에서 `40` | trial당 저장할 offset capture 수 |
+| `AIC_IMG2POS_COLLECTION_POLICY` | `near-port` | runner가 선택한 수집 정책 기록값 |
+| `AIC_IMG2POS_DATASET_VERSION` | 빈 문자열 | 데이터셋 하위 버전 디렉터리 |
+| `AIC_IMG2POS_DATASET_DIR` | `ws_aic/data/img2pos[/<version>]` | 데이터셋 출력 위치 |
+| `AIC_IMG2POS_MIN_VISIBLE_CAMERAS` | `2` | 저장에 필요한 최소 카메라 수 |
+| `AIC_IMG2POS_VISIBILITY_MARGIN_PX` | `64.0` | 영상 경계로부터 필요한 여백 |
 | `AIC_COLLECT_SYNC_TOLERANCE_MS` | `30.0` | camera/controller/TF 허용 시각 차이 |
-| `AIC_RPY_RANDOMIZATION_VAL_RATIO` | `0.3` | validation sample 비율 |
+| `AIC_IMG2POS_VAL_RATIO` | `0.15` | validation trial 비율 |
+| `AIC_IMG2POS_TEST_RATIO` | `0.15` | test trial 비율 |
 | `AIC_COLLECT_RANDOM_SEED` | 미지정 | offset 샘플링 재현용 seed |
-| `AIC_VISION_OFFSET_PUSH_TO_HUB` | `true` | 수집 완료 후 Hugging Face 업로드 여부 |
-| `AIC_VISION_OFFSET_REPO_ID` | 빈 문자열 | 업로드할 Hugging Face Dataset 저장소 |
+| `AIC_COLLECT_SETTLE_TIMEOUT_SEC` | `8.0` | reference와 실제 TCP 움직임 수렴 제한시간 |
+| `AIC_PORT_COLLECT_BASE_Z_OFFSET_M` | `0.020` | port 접근축 방향 최소 안전거리 |
 
 XYZ/RPY 범위는 `AIC_PORT_COLLECT_DX_MIN_MM`처럼
 `AIC_PORT_COLLECT_<AXIS>_MIN/MAX_*` 환경변수로 조정할 수 있습니다.
 
 ## 데이터셋 구조
 
-기본 출력은 `ws_aic/data/phy_rpy_randomization/<version>/`에 생성됩니다.
+기본 출력은 `ws_aic/data/img2pos/<version>/`에 생성됩니다.
 
 ```text
-phy_rpy_randomization/<version>/
+img2pos/<version>/
 ├── data.yaml
 ├── metadata.jsonl
-├── images/
-│   ├── train/<connector>/<camera>/*.jpg
-│   └── val/<connector>/<camera>/*.jpg
-└── metadata/
-    ├── train/<connector>/<camera>/*.json
-    └── val/<connector>/<camera>/*.json
+├── samples.jsonl
+└── images/
+    ├── train/<camera>/*.jpg
+    ├── val/<camera>/*.jpg
+    └── test/<camera>/*.jpg
 ```
 
-각 metadata에는 command pose, 측정된 plug 위치, 정렬 label, offset sample,
-카메라 가시성 및 source별 ROS timestamp가 기록됩니다.
-
-## 테스트
-
-```bash
-cd ws_aic/src/aic
-
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
-PYTHONPATH="$PWD/../phy/phy_policy/data_generator" \
-pixi run --frozen python -m pytest -q \
-  ../phy/phy_policy/data_generator/test/test_port_offset_module_layout.py \
-  ../phy/phy_policy/data_generator/test/test_port_offset_timestamp_sync.py
-```
+`metadata.jsonl`은 수집 실행마다 자동 생성된 `seed`와 총 `trials`를 한 행으로 기록합니다.
+`samples.jsonl`은 동기화된 capture당 한 행이며 `images`에 camera별 JPEG 경로를 묶고,
+`collection_policy`, 단일 `target_xyz_m`, 실제 port-local sampling offset과 관측 거리,
+sampling tier, 촬영 시각·동기화 오차, pose 수렴 품질을 한 번만 기록합니다.
+같은 `trial_id`는 항상
+같은 split에 배정되어 train/validation/test 사이의 trial 누수를 막습니다. 수집 완료 후
+`collection_summary.json`으로 실제 capture 수를 확인하고, `near-port` capture에 대해서만
+tier·안전거리 기준 ±2/5/10/50mm sampling offset 분포를 검증합니다.
 
 ## 협업 규칙
 

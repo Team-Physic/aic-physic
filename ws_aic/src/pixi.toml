@@ -47,6 +47,8 @@ pyspacemouse = ">=2.0.0, <3"
 
 [feature.phy.dependencies]
 pyyaml = ">=6,<7"
+ros-kilted-phy-policy = { path = "phy/phy_policy" }
+ros-kilted-phy-data-collection = { path = "phy/phy_data_collection" }
 ros-kilted-ros2bag = "*"
 ros-kilted-rosbag2-storage-sqlite3 = "*"
 

@@ -2,6 +2,7 @@
 AGENTS.md
 
 # Python environments and caches
+.env
 .venv/
 venv/
 env/
@@ -12,6 +13,8 @@ env/
 *.egg-info/
 **/.pytest_cache/
 **/.mypy_cache/
+ws_aic/src/phy/phy_data_collection/files.txt
+ws_aic/src/phy/phy_policy/files.txt
 
 # Editor settings
 **/.vscode/
