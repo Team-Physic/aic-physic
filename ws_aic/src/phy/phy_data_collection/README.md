@@ -15,10 +15,10 @@ cd ws_aic/src
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
   --collection-policy near-port \
-  --trials 100 \
+  --sfp-trials 31 \
+  --sc-trials 3 \
   --workers 2 \
   --samples-per-trial 40 \
-  --port-types sfp,sc \
   --dataset-version img2pos-v1 \
   --push-to-hub false \
   --record-rosbag false \
@@ -43,7 +43,7 @@ trial config·world 랜덤화
   → controller가 limit 적용 후 수락한 reference pose가 멈추고 실제 TCP의 frame 간
     이동량이 연속 frame에서 허용 범위 안으로 수렴할 때까지 대기
   → 새 camera frame과 같은 시각의 plug TF 검증
-  → 가시 camera의 JPEG와 XYZ label 저장
+  → 동기화된 세 camera의 JPEG와 공통 XYZ label 저장
   → 전체 collection summary 생성 → 선택 시 Hugging Face에 한 번 업로드
   → policy → rosbag → simulator 순서로 종료
 ```
@@ -64,12 +64,11 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 
 | 옵션 | 기본값 | 설명 |
 | --- | ---: | --- |
-| `--trials` | `100` | 실행할 독립 trial 수 |
+| `--sfp-trials` | `31` | SFP trial 수; local index를 5-bit card 조합 `00001`부터 순서대로 배정 |
+| `--sc-trials` | `3` | SC trial 수; local index를 2-bit card 조합 `01`부터 순서대로 배정 |
 | `--workers` | `1` | 동시에 실행할 격리 simulator 수 |
 | `--samples-per-trial` | `40` | trial마다 저장할 capture 수 |
 | `--collection-policy` | `near-port` | `board-view`, `descent`, `near-port` 중 선택 |
-| `--port-types` | `sfp,sc` | 수집할 connector 종류 |
-| `--port-order` | `round_robin` | connector 선택 순서; `random` 가능 |
 | `--dataset-version` | 자동 생성 | `ws_aic/data/img2pos/` 아래 새 version 경로 |
 | `--resume` | 꺼짐 | 기존 version에 명시적으로 이어서 수집 |
 | `--val-ratio`, `--test-ratio` | `0.15`, `0.15` | trial 단위 validation/test 비율 |
@@ -86,12 +85,15 @@ dataset version을 생략하면 실행 시각으로 새 이름을 만들고, 기
 
 각 worker는 고유 `ROS_DOMAIN_ID`, Zenoh router TCP port, Gazebo partition을 사용합니다.
 trial index는 worker에 round-robin으로 분배되며 JSONL append는 file lock으로 보호합니다.
+connector와 card 조합은 worker 번호가 아니라 global trial index로 결정되므로 worker 수를
+바꿔도 같은 index에는 같은 조합이 배정됩니다. 한 trial이 실패해도 worker는 남은 index를
+계속 실행하며, 전체 종료 코드는 실패를 유지합니다.
 기본 격리 값은 `ROS_DOMAIN_ID=40+worker`, Zenoh `7600+worker`입니다.
 
 ```bash
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
-  --trials 100 --workers 2 --samples-per-trial 40 \
+  --sfp-trials 31 --sc-trials 3 --workers 2 --samples-per-trial 40 \
   --dataset-version img2pos-v1
 ```
 
@@ -104,13 +106,24 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 
 | 정책 | 동작 |
 | --- | --- |
-| `board-view` | center camera optical axis가 보드 중앙을 향하도록 750~850mm 거리에서 횡방향 위치와 각도를 무작위화하고, 보드 외곽 네 점이 영상 안에 있는 capture만 저장 |
+| `board-view` | center camera optical axis가 보드 중앙을 향하도록 750~850mm 거리에서 횡방향 위치와 각도를 무작위화하고, 목표 port가 영상 안에 있는 capture만 저장 |
 | `descent` | 선택 포트를 향해 550mm부터 20mm 안전거리까지 먼 순서로 내려오며 거리·횡방향 위치·각도를 무작위화 |
 | `near-port` | 기존 20mm 안전거리 기준 50/10/5/2mm coarse/near tier를 수집 |
 
-`board-view`에서 NIC card 데이터를 수집하려면 `--port-types sfp`를 사용합니다. 공식 AIC
-task board에는 `nic_rail_0`부터 `nic_rail_4`까지 총 5개 rail이 있으며, runner는 매 5개
-SFP trial에서 모든 rail을 한 번씩 무작위 순서로 배정합니다.
+공식 AIC task board에는 NIC rail 5개와 SC rail 2개가 있습니다. bit의 오른쪽부터 rail
+0, 1, ...에 대응하며 `0`은 card 없음, `1`은 card 생성을 뜻합니다. 빈 board 조합은
+제외합니다.
+
+```text
+SFP local index 0..30 → 00001, 00010, ... , 11111
+SC  local index 0..2  → 01, 10, 11
+```
+
+기본 `--sfp-trials 31 --sc-trials 3`은 각 조합을 정확히 한 번 생성합니다. 지정 수가 조합
+수보다 크면 처음 조합부터 순환하며, 작으면 앞쪽 조합까지만 생성합니다. 특정 connector를
+끄려면 해당 trial 수를 `0`으로 설정합니다. 예: SFP `board-view`만 실행하려면
+`--sfp-trials 31 --sc-trials 0`을 사용합니다. target rail은 현재 조합의 활성 rail 중에서만
+seed 기반으로 선택됩니다.
 
 | 옵션 | 기본값 | 설명 |
 | --- | ---: | --- |
@@ -145,8 +158,6 @@ translation과 RPY는 모두 0이지만 port와의 안전거리 20mm는 유지�
 | --- | ---: | --- |
 | `--min-visible-cameras` | `2` | 저장에 필요한 최소 가시 camera 수 |
 | `--visibility-margin-px` | `64` | 영상 경계에서 제외할 여백 |
-| `--board-min-visible-cameras` | `1` | board-view에서 보드 전체가 보여야 하는 최소 camera 수 |
-| `--board-visibility-margin-px` | `32` | board-view 보드 외곽과 영상 경계 사이 최소 여백 |
 | `--sync-tolerance-ms` | `30` | capture stamp와 controller/동적 TF 최대 시각 차이 |
 | `--sync-wait-timeout-s` | `1` | 새 Observation과 capture 시각 TF 대기시간 |
 | `--settle-timeout-s` | `8` | reference와 실제 TCP 움직임 수렴 제한시간 |
@@ -158,7 +169,10 @@ translation과 RPY는 모두 0이지만 port와의 안전거리 20mm는 유지�
 세 image의 `header.stamp`가 정확히 같고 controller가 허용 오차 안에 있는 Observation만
 사용합니다. 공통 capture stamp로 plug TF를 한 번 조회하여 하나의 `target_xyz_m`을
 계산합니다.
-port 또는 board가 지정 개수 이상의 camera에 보일 때만 저장합니다. `descent`와
+모든 collection policy에서 목표 port가 지정 개수 이상의 camera에 보일 때만 승인합니다.
+승인된 capture는 port 가시성 여부와 관계없이 동기화된 left/center/right 이미지 3장과
+공통 `target_xyz_m`을 한 묶음으로 저장합니다. 이미지 한 장이라도 저장하지 못하면 partial
+capture를 삭제하고 재시도합니다. `descent`와
 `near-port`는 실제 TF의 접근축 거리가 20mm 이상인지 검사하고, `near-port`는 추가로
 20mm 안전거리를 제외한 port-local offset이 배정된 sampling tier 안에 있는지도
 검사합니다. 명령 직후 frame은
@@ -208,6 +222,7 @@ trial이 정상 종료됩니다.
 ```text
 ws_aic/data/img2pos/<version>/
 ├── data.yaml
+├── metadata.jsonl
 ├── samples.jsonl
 └── images/
     ├── train/<left|center|right>/*.jpg
@@ -215,13 +230,20 @@ ws_aic/data/img2pos/<version>/
     └── test/<left|center|right>/*.jpg
 ```
 
-한 JSONL row는 동일한 `capture_stamp_ns`를 공유하는 동기화 capture 하나에 대응합니다.
+`metadata.jsonl`은 수집 실행마다 한 row를 추가합니다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `seed` | 실행 시 전달한 `--seed` 값 |
+| `trials` | 실행한 총 trial 수: `sfp_trials + sc_trials` |
+
+`samples.jsonl`의 한 row는 동일한 `capture_stamp_ns`를 공유하는 동기화 capture 하나에 대응합니다.
 
 | 필드 | 의미 |
 | --- | --- |
 | `id` | 동기화 capture 식별자 |
 | `trial_id`, `split` | trial 식별자와 trial 단위 train/val/test 분할 |
-| `images`, `connector` | camera 이름을 key로 갖는 JPEG 상대 경로 mapping과 connector 구분 |
+| `images`, `connector` | 항상 `left`, `center`, `right`를 모두 갖는 JPEG 상대 경로 mapping과 connector 구분 |
 | `collection_policy` | `board-view`, `descent`, `near-port` 수집 구간 |
 | `target_xyz_m` | 공통 촬영 시점 `base_link`의 `port_entrance - plug_reference` correction |
 | `sampling_offset_xyz_m` | 최소 안전거리를 제외한 실제 port-local XYZ; tier 분포 감사용 |
@@ -231,8 +253,8 @@ ws_aic/data/img2pos/<version>/
 | `max_sync_skew_ns` | 승인 source들의 최대 시각 차이 |
 | `settle_*` | 촬영 전 연속 controller frame 간 최종 TCP 이동량과 대기시간 |
 
-같은 trial의 모든 capture는 같은 split에 배정됩니다. 기본 100 trial은 정확히
-70 train, 15 validation, 15 test로 배정됩니다. command pose, RPY,
+같은 trial의 모든 capture는 같은 split에 배정됩니다. 기본 34 trial은 정확히
+24 train, 5 validation, 5 test로 배정됩니다. command pose, RPY,
 scenario, projection, 전체 TF는 img2pos 입력·정답이 아니므로 dataset에 중복 저장하지
 않습니다.
 

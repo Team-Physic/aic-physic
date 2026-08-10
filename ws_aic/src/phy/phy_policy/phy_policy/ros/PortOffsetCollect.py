@@ -66,6 +66,14 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_optional_int(name: str) -> int | None:
+    """환경변수를 int로 읽고 없거나 잘못되면 None을 반환한다."""
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return None
+
+
 def _env_float_list(name: str, default: str) -> list[float]:
     """쉼표로 구분한 환경변수를 유한한 float 목록으로 변환한다."""
     values = []
@@ -146,8 +154,9 @@ class PortOffsetCollect(Policy):
             1.0, _env_float("AIC_COLLECT_CAPTURE_ATTEMPT_MULTIPLIER", 2.0)
         )
         self.color_log = _env_bool("AIC_COLLECT_COLOR_LOG", True) and not os.environ.get("NO_COLOR")
-        seed = os.environ.get("AIC_COLLECT_RANDOM_SEED", "").strip()
-        self.rng = np.random.default_rng(int(seed) if seed else None)
+        self.rng = np.random.default_rng(
+            _env_optional_int("AIC_COLLECT_RANDOM_SEED")
+        )
         self.planner = motion.Planner()
         self.board_distance_range = (
             max(
@@ -185,20 +194,12 @@ class PortOffsetCollect(Policy):
         self.dataset_version = os.environ.get("AIC_IMG2POS_DATASET_VERSION", "").strip()
         self.samples_path = self.dataset_dir / "samples.jsonl"
         self.run_id = os.environ.get("AIC_PORTOFFSET_RUN_ID", "").strip()
-        self.trial_index = os.environ.get("AIC_PORTOFFSET_TRIAL_INDEX", "").strip()
+        self.trial_index = _env_optional_int("AIC_PORTOFFSET_TRIAL_INDEX")
         self.val_ratio = _env_float("AIC_IMG2POS_VAL_RATIO", 0.15)
         self.test_ratio = _env_float("AIC_IMG2POS_TEST_RATIO", 0.15)
         self.trial_split = os.environ.get("AIC_IMG2POS_TRIAL_SPLIT", "").strip().lower()
         self.visibility_margin_px = _env_float("AIC_IMG2POS_VISIBILITY_MARGIN_PX", 64.0)
         self.min_visible_cameras = max(1, int(os.environ.get("AIC_IMG2POS_MIN_VISIBLE_CAMERAS", "2")))
-        self.board_visibility_margin_px = max(
-            0.0,
-            _env_float("AIC_IMG2POS_BOARD_VISIBILITY_MARGIN_PX", 32.0),
-        )
-        self.board_min_visible_cameras = max(
-            1,
-            int(os.environ.get("AIC_IMG2POS_BOARD_MIN_VISIBLE_CAMERAS", "1")),
-        )
         self.capture_count = 0
         self.record = _env_bool("AIC_IMG2POS_RECORD", True)
         xy_limit = _env_float("AIC_PORT_COLLECT_XY_LIMIT_MM", 50.0) / 1000.0

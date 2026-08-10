@@ -368,8 +368,11 @@ def _port_is_available(port: int) -> bool:
 
 def _prepare_args(args: argparse.Namespace) -> None:
     """대규모/병렬 수집 인자를 검증하고 안전한 기본 출력 version을 확정한다."""
+    if args.sfp_trials < 0 or args.sc_trials < 0:
+        raise ValueError("sfp-trials and sc-trials must be non-negative")
+    args.trials = args.sfp_trials + args.sc_trials
     if args.trials < 1 or args.samples_per_trial < 1:
-        raise ValueError("trials and samples-per-trial must be positive")
+        raise ValueError("total trials and samples-per-trial must be positive")
     if args.workers < 1 or args.workers > args.trials:
         raise ValueError("workers must be between 1 and trials")
     if not 0.0 <= args.val_ratio < 1.0 or not 0.0 <= args.test_ratio < 1.0:
@@ -399,13 +402,10 @@ def _prepare_args(args: argparse.Namespace) -> None:
         args.descent_lateral_limit_mm,
         args.descent_angle_limit_deg,
         args.visibility_margin_px,
-        args.board_visibility_margin_px,
     ) < 0.0:
         raise ValueError("policy limits and visibility margins must be non-negative")
     if not 1 <= args.min_visible_cameras <= 3:
         raise ValueError("min-visible-cameras must be in [1, 3]")
-    if not 1 <= args.board_min_visible_cameras <= 3:
-        raise ValueError("board-min-visible-cameras must be in [1, 3]")
     if not args.policy.strip():
         args.policy = COLLECTION_POLICY_MODULES[args.collection_policy]
     if args.ros_domain_id_base < 0 or args.ros_domain_id_base + args.workers - 1 > 232:
@@ -473,19 +473,24 @@ def _run_worker(
         f"ROS_DOMAIN_ID={args.worker_ros_domain_id}, "
         f"zenoh_port={args.worker_zenoh_port}, partition={args.worker_gz_partition}"
     )
+    failed_indices: list[int] = []
     try:
         for index in trial_indices:
             rng = random.Random(args.seed + index * 1_000_003)
-            _run_trial(ctx, index, rng)
+            try:
+                _run_trial(ctx, index, rng)
+            except RuntimeError as exc:
+                failed_indices.append(index)
+                print(f"[error] trial {index} failed: {exc}; continuing worker")
     except KeyboardInterrupt:
         print("\n[interrupt] cleaning collector-owned process groups...")
         _cleanup_interrupted_run(ctx)
         return 130
-    except RuntimeError as exc:
-        print(f"[error] {exc}")
-        return 1
     finally:
         _persist_groups(ctx)
+    if failed_indices:
+        print(f"[error] worker {worker_id} failed trials: {failed_indices}")
+        return 1
     return 0
 
 
@@ -499,13 +504,18 @@ def _worker_entry(
     raise SystemExit(_run_worker(args, parent_run_id, worker_id, trial_indices))
 
 
+def _worker_trial_indices(total: int, workers: int, worker_id: int) -> list[int]:
+    """global trial index를 worker에 중복 없이 round-robin 배정한다."""
+    return list(range(worker_id, total, workers))
+
+
 def _run_parallel(args: argparse.Namespace, parent_run_id: str) -> int:
     """trial을 worker별 round-robin 분배하고 모든 child 완료를 기다린다."""
     process_context = multiprocessing.get_context("spawn")
     processes: list[multiprocessing.Process] = []
     try:
         for worker_id in range(args.workers):
-            indices = list(range(worker_id, args.trials, args.workers))
+            indices = _worker_trial_indices(args.trials, args.workers, worker_id)
             process = process_context.Process(
                 target=_worker_entry,
                 args=(args, parent_run_id, worker_id, indices),
@@ -568,6 +578,17 @@ def _finalize_dataset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_metadata(args: argparse.Namespace) -> None:
+    """현재 수집 실행의 seed와 총 trial 수를 별도 JSONL에 기록한다."""
+    output_dir = dataset_dir(args)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with (output_dir / "metadata.jsonl").open("a", encoding="utf-8") as stream:
+        stream.write(
+            json.dumps({"seed": args.seed, "trials": args.trials}, ensure_ascii=False)
+            + "\n"
+        )
+
+
 def main() -> int:
     """CLI를 해석하고 독립 worker에서 randomized trial을 실행한다."""
     args = parse_args()
@@ -583,6 +604,8 @@ def main() -> int:
             return 1
         if args.cleanup_only:
             return 0
+    if not args.dry_run:
+        _write_metadata(args)
     parent_run_id = f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     result = (
         _run_worker(args, parent_run_id, 0, list(range(args.trials)))

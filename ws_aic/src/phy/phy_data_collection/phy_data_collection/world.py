@@ -86,12 +86,15 @@ def log_trial_randomization(
     print(f"{_color(args, '[Task Board]', 'cyan')} xyz={_vec_mm(board_xyz)} yaw={board_yaw}")
     if port_type == "sc":
         port_detail = (
-            f"type=SC rail={rail_idx} target=sc_port_{rail_idx}/sc_port_base "
+            f"type=SC cards={scenario.get('combination_bits', '')} "
+            f"active_rails={scenario.get('active_rails', [])} "
+            f"target=sc_port_{rail_idx}/sc_port_base "
             f"sc_translation={_mm(float(scenario.get('sc_translation', 0.0)))}"
         )
     else:
         port_detail = (
-            f"type=SFP rail={rail_idx} "
+            f"type=SFP cards={scenario.get('combination_bits', '')} "
+            f"active_rails={scenario.get('active_rails', [])} target_rail={rail_idx} "
             f"port=sfp_port_{int(scenario.get('sfp_port_idx', -1))} "
             f"nic_translation={_mm(float(scenario.get('nic_translation', 0.0)))} "
             f"nic_yaw={_deg(float(scenario.get('nic_yaw', 0.0)))} "
@@ -110,7 +113,8 @@ def log_trial_randomization(
 
     sim_parts = [
         f"headless={bool(args.headless)}",
-        f"port_order={args.port_order}",
+        f"sfp_trials={args.sfp_trials}",
+        f"sc_trials={args.sc_trials}",
         f"samples={args.samples_per_trial}",
     ]
     if not lighting.get("enabled"):

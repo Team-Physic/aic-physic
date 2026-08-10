@@ -20,12 +20,6 @@ from phy_policy.data_generator.geometry import pose_matrix, quaternion_matrix
 
 
 SFP_REFERENCE_OFFSET = np.array([0.0, 0.0021125, 0.0], dtype=float)
-BOARD_CORNERS_LOCAL = (
-    (-0.150, -0.214, 0.012),
-    (-0.150, 0.214, 0.012),
-    (0.150, -0.214, 0.012),
-    (0.150, 0.214, 0.012),
-)
 
 
 def image_for_camera(observation, camera: str):
@@ -67,24 +61,6 @@ def _base_to_camera(policy, observation, camera: str) -> np.ndarray:
     return np.linalg.inv(base_tool0 @ policy._tool0_optical[camera])
 
 
-def board_corners(board_tf: Transform) -> list[list[float]]:
-    """task board 외곽 네 점을 base_link 좌표로 변환한다."""
-    rotation = quaternion_matrix(
-        board_tf.rotation.x,
-        board_tf.rotation.y,
-        board_tf.rotation.z,
-        board_tf.rotation.w,
-    )
-    translation = np.array(
-        [board_tf.translation.x, board_tf.translation.y, board_tf.translation.z],
-        dtype=float,
-    )
-    return [
-        list(map(float, rotation @ np.asarray(point, dtype=float) + translation))
-        for point in BOARD_CORNERS_LOCAL
-    ]
-
-
 def _points_projection(
     policy,
     observation,
@@ -104,11 +80,7 @@ def _points_projection(
         ]
     except Exception as exc:
         return {"visible": False, "reason": f"camera_transform_error: {exc}"}
-    margin = (
-        policy.board_visibility_margin_px
-        if len(points_base) > 1
-        else policy.visibility_margin_px
-    )
+    margin = policy.visibility_margin_px
     projections = []
     for point_camera in points_camera:
         depth = float(point_camera[2])
@@ -404,12 +376,13 @@ def write_manifest(policy) -> None:
         )
     content = "\n".join(
         [
-            "schema_version: 3",
+            "schema_version: 4",
             "task: img2pos",
             f"version: {policy.dataset_version or 'default'}",
             "sample_unit: synchronized_capture",
             "input: synchronized_rgb_images",
             "samples: samples.jsonl",
+            "metadata: metadata.jsonl",
             "image_layout: images/<split>/<camera>/*.jpg",
             "cameras: [left, center, right]",
             "target:",
@@ -444,9 +417,8 @@ def save_sample(
     label_xyz: list[float],
     sample: dict[str, Any],
     settle: dict[str, float],
-    board_tf: Transform | None = None,
 ) -> tuple[bool, str]:
-    """동일 촬영시각의 가시 camera JPEG와 단일 img2pos label을 저장한다."""
+    """port 가시성 승인 후 동일 촬영시각의 세 camera와 공통 label을 저장한다."""
     if observation is None:
         return False, "Observation을 받지 못함"
     if not timestamps.get("sync_valid", False):
@@ -456,25 +428,14 @@ def save_sample(
         return False, "유효한 camera capture timestamp가 없음"
     if len(label_xyz) != 3 or not all(np.isfinite(float(value)) for value in label_xyz):
         return False, "유효한 XYZ correction label이 없음"
-    visibility_points = board_corners(board_tf) if board_tf is not None else None
     visibility = {
-        camera: (
-            _points_projection(
-                policy, observation, camera, visibility_points
-            )
-            if visibility_points is not None
-            else _port_projection(policy, observation, camera, port_tf)
-        )
+        camera: _port_projection(policy, observation, camera, port_tf)
         for camera in ("left", "center", "right")
     }
     visible = [
         camera for camera, result in visibility.items() if result.get("visible", False)
     ]
-    required_cameras = (
-        policy.board_min_visible_cameras
-        if board_tf is not None
-        else policy.min_visible_cameras
-    )
+    required_cameras = policy.min_visible_cameras
     if len(visible) < required_cameras:
         detail = {
             camera: result.get("reason")
@@ -484,9 +445,8 @@ def save_sample(
             ]
             for camera, result in visibility.items()
         }
-        target = "보드" if board_tf is not None else "포트"
         return False, (
-            f"{target} 가시성 부족: visible={visible}, "
+            f"포트 가시성 부족: visible={visible}, "
             f"required={required_cameras}, projection={detail}"
         )
 
@@ -496,7 +456,7 @@ def save_sample(
     images: dict[str, str] = {}
     written: list[Path] = []
     failures: list[str] = []
-    for camera in visible:
+    for camera in visibility:
         image = image_to_bgr(policy, image_for_camera(observation, camera), camera)
         if image is None:
             failures.append(f"{camera}: image 변환 실패")
@@ -504,14 +464,15 @@ def save_sample(
         path = policy.dataset_dir / "images" / split / camera / f"{capture_id}_{camera}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
         if not cv2.imwrite(str(path), image):
+            path.unlink(missing_ok=True)
             failures.append(f"{camera}: JPEG 저장 실패 ({path})")
             continue
         written.append(path)
         images[camera] = str(path.relative_to(policy.dataset_dir))
-    if len(images) < required_cameras:
+    if len(images) != len(visibility):
         for path in written:
             path.unlink(missing_ok=True)
-        return False, f"camera 저장 부족: required={required_cameras}, details={failures}"
+        return False, f"세 camera 저장 불완전: details={failures}"
     record = {
         "id": capture_id,
         "trial_id": trial_id,

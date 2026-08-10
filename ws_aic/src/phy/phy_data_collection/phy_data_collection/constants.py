@@ -33,7 +33,6 @@ TRIAL_TIMEOUT_GRACE_S = 180.0
 MIN_CLEARANCE_MM = 20.0
 
 BOOLEAN_METAVAR = "{true,false}"
-PORT_ORDER_CHOICES = ("round_robin", "random")
 ROSBAG_TOPICS = (
     "/clock",
     "/joint_states",
@@ -49,11 +48,10 @@ ROSBAG_TOPICS = (
 
 CLI_DEFAULTS = {
     # Trial and simulator.
-    "trials": 100,
+    "sfp_trials": 31,
+    "sc_trials": 3,
     "workers": 1,
     "seed": 30,
-    "port_types": "sfp,sc",
-    "port_order": "round_robin",
     "color_log": True,
     "samples_per_trial": 40,
     "time_limit_s": 600,
@@ -112,8 +110,6 @@ CLI_DEFAULTS = {
     "descent_angle_limit_deg": 20.0,
     "min_visible_cameras": 2,
     "visibility_margin_px": 64.0,
-    "board_min_visible_cameras": 1,
-    "board_visibility_margin_px": 32.0,
     # Capture timestamp synchronization.
     "sync_tolerance_ms": 30.0,
     "sync_wait_timeout_s": 1.0,

@@ -11,7 +11,6 @@ from .constants import (
     CLI_DEFAULTS,
     COLLECTION_POLICY_CHOICES,
     ENGINE_SETUP,
-    PORT_ORDER_CHOICES,
     TRIAL_TIMEOUT_GRACE_S,
 )
 
@@ -37,12 +36,11 @@ def _add_argument(
 
 
 def _add_trial_args(parser: argparse.ArgumentParser) -> None:
-    """trial 개수, 순서, simulator 시작과 관련된 기본 인자를 추가한다."""
-    _add_argument(parser, "trials", type=int)
+    """connector별 trial 개수와 simulator 시작 인자를 추가한다."""
+    _add_argument(parser, "sfp_trials", type=int)
+    _add_argument(parser, "sc_trials", type=int)
     _add_argument(parser, "workers", type=int)
     _add_argument(parser, "seed", type=int)
-    _add_argument(parser, "port_types")
-    _add_argument(parser, "port_order", choices=PORT_ORDER_CHOICES)
     _add_argument(parser, "color_log", type=_parse_bool, metavar=BOOLEAN_METAVAR)
     _add_argument(parser, "samples_per_trial", type=int)
     _add_argument(parser, "time_limit_s", type=int)
@@ -124,11 +122,9 @@ def _add_pose_args(parser: argparse.ArgumentParser) -> None:
         "descent_lateral_limit_mm",
         "descent_angle_limit_deg",
         "visibility_margin_px",
-        "board_visibility_margin_px",
     ):
         _add_argument(parser, name, type=float)
     _add_argument(parser, "min_visible_cameras", type=int)
-    _add_argument(parser, "board_min_visible_cameras", type=int)
     _add_argument(parser, "sampling_tiers_mm")
     _add_argument(parser, "sampling_tier_weights")
 

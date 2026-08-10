@@ -827,11 +827,6 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 label_xyz=label_xyz,
                 sample=sample,
                 settle=settle,
-                board_tf=(
-                    context["board_snapshot"].transform
-                    if context.get("board_snapshot") is not None
-                    else None
-                ),
             )
             if saved:
                 context["counts"]["collect"] += 1

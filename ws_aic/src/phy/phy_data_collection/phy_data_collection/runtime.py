@@ -32,7 +32,6 @@ from .lifecycle import (
     terminate_pgid,
     wait_group_exit,
 )
-
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
@@ -362,12 +361,6 @@ def _policy_environment(
     _set_optional_env(env, "AIC_PORT_COLLECT_RPY_NORM_MAX_RAD", args.rpy_norm_max_rad)
     env["AIC_IMG2POS_MIN_VISIBLE_CAMERAS"] = str(args.min_visible_cameras)
     env["AIC_IMG2POS_VISIBILITY_MARGIN_PX"] = str(args.visibility_margin_px)
-    env["AIC_IMG2POS_BOARD_MIN_VISIBLE_CAMERAS"] = str(
-        args.board_min_visible_cameras
-    )
-    env["AIC_IMG2POS_BOARD_VISIBILITY_MARGIN_PX"] = str(
-        args.board_visibility_margin_px
-    )
     env["AIC_PORT_COLLECT_BASE_Z_OFFSET_M"] = str(args.base_z_offset_mm / 1000.0)
     env["AIC_BOARD_VIEW_DISTANCE_MIN_M"] = str(args.board_distance_min_mm / 1000.0)
     env["AIC_BOARD_VIEW_DISTANCE_MAX_M"] = str(args.board_distance_max_mm / 1000.0)

@@ -109,23 +109,37 @@ def _present_entity(name: str, translation: float = 0.0, yaw: float = 0.0) -> di
     }
 
 
-def _nic_rails(active_rail: int, translation: float, yaw: float) -> dict:
-    """선택한 NIC rail 하나만 활성화한 rail 구성을 생성한다."""
-    rails = {f"nic_rail_{index}": {"entity_present": False} for index in range(SFP_NIC_RAIL_COUNT)}
-    rails[f"nic_rail_{active_rail}"] = _present_entity(
-        f"nic_card_{active_rail}",
-        translation,
-        yaw,
-    )
+def _combination_mask(local_index: int, rail_count: int) -> int:
+    """local trial index를 0이 아닌 rail bitmask에 순환 대응한다."""
+    return local_index % ((1 << rail_count) - 1) + 1
+
+
+def _active_rails(mask: int, rail_count: int) -> list[int]:
+    """bitmask에서 활성 rail index를 낮은 번호 순서로 반환한다."""
+    return [index for index in range(rail_count) if mask & (1 << index)]
+
+
+def trial_identity(index: int, sfp_trials: int) -> tuple[str, int, int, str]:
+    """global index의 connector, local index와 card bitmask를 반환한다."""
+    if index < sfp_trials:
+        port_type, local_index, rail_count = "sfp", index, SFP_NIC_RAIL_COUNT
+    else:
+        port_type, local_index, rail_count = "sc", index - sfp_trials, SC_RAIL_COUNT
+    mask = _combination_mask(local_index, rail_count)
+    return port_type, local_index, mask, f"{mask:0{rail_count}b}"
+
+
+def _nic_rails(poses: dict[int, tuple[float, float]]) -> dict:
+    """bitmask에서 계산된 모든 NIC card pose를 rail 구성으로 변환한다."""
+    rails = {
+        f"nic_rail_{index}": {"entity_present": False}
+        for index in range(SFP_NIC_RAIL_COUNT)
+    }
+    for rail, (translation, yaw) in poses.items():
+        rails[f"nic_rail_{rail}"] = _present_entity(
+            f"nic_card_{rail}", translation, yaw
+        )
     return rails
-
-
-def _nic_rail_for_trial(index: int, seed: int) -> int:
-    """매 5개 SFP trial에서 모든 rail을 한 번씩 무작위 순서로 선택한다."""
-    block, position = divmod(index, SFP_NIC_RAIL_COUNT)
-    rails = list(range(SFP_NIC_RAIL_COUNT))
-    random.Random(seed ^ (block * 0x9E3779B1)).shuffle(rails)
-    return rails[position]
 
 
 def _background_sc_rails(rng: random.Random) -> dict:
@@ -139,13 +153,16 @@ def _background_sc_rails(rng: random.Random) -> dict:
     }
 
 
-def _sc_rails(active_rail: int, translation: float) -> dict:
-    """선택한 SC rail 하나만 활성화한 rail 구성을 생성한다."""
-    rails = {f"sc_rail_{index}": {"entity_present": False} for index in range(SC_RAIL_COUNT)}
-    rails[f"sc_rail_{active_rail}"] = _present_entity(
-        f"sc_mount_{active_rail}",
-        translation,
-    )
+def _sc_rails(poses: dict[int, float]) -> dict:
+    """bitmask에서 계산된 모든 SC card pose를 rail 구성으로 변환한다."""
+    rails = {
+        f"sc_rail_{index}": {"entity_present": False}
+        for index in range(SC_RAIL_COUNT)
+    }
+    for rail, translation in poses.items():
+        rails[f"sc_rail_{rail}"] = _present_entity(
+            f"sc_mount_{rail}", translation
+        )
     return rails
 
 
@@ -249,6 +266,9 @@ def _scenario_metadata(
     trial_type: int,
     port_type: str,
     rail_idx: int,
+    combination_mask: int,
+    combination_bits: str,
+    active_rails: list[int],
     board: dict,
     gripper_offset: dict,
     cable_rpy: tuple[float, float, float],
@@ -263,6 +283,9 @@ def _scenario_metadata(
         "trial_type": trial_type,
         "port_type": port_type,
         "rail_idx": rail_idx,
+        "combination_mask": combination_mask,
+        "combination_bits": combination_bits,
+        "active_rails": active_rails,
         "board_x": board["x"],
         "board_y": board["y"],
         "board_yaw": board["yaw"],
@@ -281,22 +304,34 @@ def _scenario_metadata(
 
 def _make_sfp_trial(
     index: int,
+    combination_mask: int,
     rng: random.Random,
     args: argparse.Namespace,
 ) -> tuple[str, dict, dict]:
-    """하나의 SFP trial과 추적 metadata를 uniform randomization으로 만든다."""
-    nic_rail = _nic_rail_for_trial(index, args.seed)
+    """지정 card 조합을 가진 SFP trial과 추적 metadata를 만든다."""
+    active_rails = _active_rails(combination_mask, SFP_NIC_RAIL_COUNT)
+    nic_rail = rng.choice(active_rails)
     port_index = rng.randrange(SFP_PORT_COUNT)
     port_name = f"sfp_port_{port_index}"
-    task_id = f"portoffset_sfp_{index:04d}_rail{nic_rail}_{port_name}"
+    combination_bits = f"{combination_mask:0{SFP_NIC_RAIL_COUNT}b}"
+    task_id = (
+        f"portoffset_sfp_{index:04d}_cards{combination_bits}_"
+        f"rail{nic_rail}_{port_name}"
+    )
     board = _board_pose(rng, "sfp")
-    nic_translation = rng.uniform(*LIMITS["nic_translation"])
-    nic_yaw = rng.uniform(*LIMITS["nic_yaw"])
+    nic_poses = {
+        rail: (
+            rng.uniform(*LIMITS["nic_translation"]),
+            rng.uniform(*LIMITS["nic_yaw"]),
+        )
+        for rail in active_rails
+    }
+    nic_translation, nic_yaw = nic_poses[nic_rail]
     gripper_offset = _gripper_offset(rng, "sfp")
     cable_rpy = _cable_rpy(rng, args)
 
     task_board = {"pose": board}
-    task_board.update(_nic_rails(nic_rail, nic_translation, nic_yaw))
+    task_board.update(_nic_rails(nic_poses))
     task_board.update(_background_sc_rails(rng))
     task_board.update(_mount_rails("sfp"))
     cable_name = "cable_0"
@@ -326,6 +361,9 @@ def _make_sfp_trial(
         trial_type=0,
         port_type="sfp",
         rail_idx=nic_rail,
+        combination_mask=combination_mask,
+        combination_bits=combination_bits,
+        active_rails=active_rails,
         board=board,
         gripper_offset=gripper_offset,
         cable_rpy=cable_rpy,
@@ -339,14 +377,21 @@ def _make_sfp_trial(
 
 def _make_sc_trial(
     index: int,
+    combination_mask: int,
     rng: random.Random,
     args: argparse.Namespace,
 ) -> tuple[str, dict, dict]:
-    """하나의 SC trial과 추적 metadata를 uniform randomization으로 만든다."""
-    sc_rail = rng.randrange(SC_RAIL_COUNT)
-    task_id = f"portoffset_sc_{index:04d}_rail{sc_rail}"
+    """지정 card 조합을 가진 SC trial과 추적 metadata를 만든다."""
+    active_rails = _active_rails(combination_mask, SC_RAIL_COUNT)
+    sc_rail = rng.choice(active_rails)
+    combination_bits = f"{combination_mask:0{SC_RAIL_COUNT}b}"
+    task_id = f"portoffset_sc_{index:04d}_cards{combination_bits}_rail{sc_rail}"
     board = _board_pose(rng, "sc")
-    sc_translation = rng.uniform(*LIMITS["sc_translation"])
+    sc_poses = {
+        rail: rng.uniform(*LIMITS["sc_translation"])
+        for rail in active_rails
+    }
+    sc_translation = sc_poses[sc_rail]
     gripper_offset = _gripper_offset(rng, "sc")
     cable_rpy = _cable_rpy(rng, args)
 
@@ -354,7 +399,7 @@ def _make_sc_trial(
     task_board.update(
         {f"nic_rail_{rail}": {"entity_present": False} for rail in range(SFP_NIC_RAIL_COUNT)}
     )
-    task_board.update(_sc_rails(sc_rail, sc_translation))
+    task_board.update(_sc_rails(sc_poses))
     task_board.update(_mount_rails("sc"))
     cable_name = "cable_1"
     trial = {
@@ -383,6 +428,9 @@ def _make_sc_trial(
         trial_type=1,
         port_type="sc",
         rail_idx=sc_rail,
+        combination_mask=combination_mask,
+        combination_bits=combination_bits,
+        active_rails=active_rails,
         board=board,
         gripper_offset=gripper_offset,
         cable_rpy=cable_rpy,
@@ -391,28 +439,21 @@ def _make_sc_trial(
     return task_id, trial, {task_id: metadata}
 
 
-def _enabled_port_types(args: argparse.Namespace) -> list[str]:
-    """CLI 문자열에서 지원되는 포트 종류만 순서를 유지해 추출한다."""
-    values = [token.strip().lower() for token in args.port_types.split(",")]
-    port_types = [value for value in values if value in {"sfp", "sc"}]
-    return port_types or ["sfp", "sc"]
-
-
 def make_trial_config(
     index: int,
     rng: random.Random,
     args: argparse.Namespace,
 ) -> tuple[dict, dict]:
-    """포트 순서를 선택하고 AIC engine config와 metadata를 완성한다."""
-    port_types = _enabled_port_types(args)
-    if args.port_order == "round_robin":
-        port_type = port_types[index % len(port_types)]
+    """global trial index에 대응하는 connector와 card 조합 config를 만든다."""
+    port_type, _, combination_mask, _ = trial_identity(index, args.sfp_trials)
+    if port_type == "sfp":
+        task_id, trial, scenario_params = _make_sfp_trial(
+            index, combination_mask, rng, args
+        )
     else:
-        port_type = rng.choice(port_types)
-    if port_type == "sc":
-        task_id, trial, scenario_params = _make_sc_trial(index, rng, args)
-    else:
-        task_id, trial, scenario_params = _make_sfp_trial(index, rng, args)
+        task_id, trial, scenario_params = _make_sc_trial(
+            index, combination_mask, rng, args
+        )
     robot = _robot_section(rng, args.robot_joint_noise_deg)
     config = {
         "scoring": _scoring_section(),

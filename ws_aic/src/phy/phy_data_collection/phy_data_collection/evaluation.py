@@ -64,6 +64,8 @@ def summarize_dataset(dataset_dir: Path) -> dict[str, Any]:
         images = row.get("images")
         if not isinstance(images, dict) or not images:
             raise ValueError(f"{capture_id}: invalid images mapping")
+        if set(images) != {"left", "center", "right"}:
+            raise ValueError(f"{capture_id}: synchronized camera triplet is incomplete")
         captures[capture_id] = row
         image_counts_by_split[str(row["split"])] += len(images)
         image_counts_by_camera.update(str(camera) for camera in images)
