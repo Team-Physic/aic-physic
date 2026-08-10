@@ -2,6 +2,7 @@
 AGENTS.md
 
 # Python environments and caches
+.env
 .venv/
 venv/
 env/
