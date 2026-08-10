@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 from phy_data_collection.paths import PROJECT_ROOT
@@ -61,8 +60,8 @@ CLI_DEFAULTS = {
     "zenoh_port_base": 7600,
     "worker_start_delay_s": 2.0,
     "policy_start_wait_s": 5.0,
-    "robot_joint_noise_deg": 4.0,
-    "cable_rpy_noise_deg": 20.0,
+    "robot_joint_noise_rad": 0.06981317007977318,
+    "cable_rotation_noise_rad": 0.04,
     "collection_policy": "near-port",
     # Per-trial rosbag2 recording.
     "record_rosbag": False,
@@ -88,35 +87,34 @@ CLI_DEFAULTS = {
     "dz_max_mm": 50.0,
     "sampling_tiers_mm": "50,10,5,2",
     "sampling_tier_weights": "1,1,1,1",
-    "port_roll_limit_deg": 25.0,
-    "port_pitch_limit_deg": 25.0,
-    "port_yaw_limit_deg": 35.0,
-    "roll_min_deg": None,
-    "roll_max_deg": None,
-    "pitch_min_deg": None,
-    "pitch_max_deg": None,
-    "yaw_min_deg": None,
-    "yaw_max_deg": None,
+    "port_roll_limit_rad": 0.4363323129985824,
+    "port_pitch_limit_rad": 0.4363323129985824,
+    "port_yaw_limit_rad": 0.6108652381980153,
+    "roll_min_rad": None,
+    "roll_max_rad": None,
+    "pitch_min_rad": None,
+    "pitch_max_rad": None,
+    "yaw_min_rad": None,
+    "yaw_max_rad": None,
     "rpy_norm_max_rad": None,
     "base_z_offset_mm": MIN_CLEARANCE_MM,
     "board_distance_min_mm": 750.0,
     "board_distance_max_mm": 850.0,
     "board_lateral_limit_mm": 30.0,
-    "board_angle_limit_deg": 15.0,
+    "board_angle_limit_rad": 0.2617993877991494,
     "descent_start_distance_mm": 550.0,
     "descent_lateral_limit_mm": 40.0,
-    "descent_angle_limit_deg": 20.0,
+    "descent_angle_limit_rad": 0.3490658503988659,
     "min_visible_cameras": 2,
-    "visibility_margin_px": 64.0,
     # Capture timestamp synchronization.
     "sync_tolerance_ms": 30.0,
     "sync_wait_timeout_s": 1.0,
     "settle_timeout_s": 8.0,
     "settle_position_tolerance_mm": 1.0,
-    "settle_orientation_tolerance_deg": 1.0,
+    "settle_orientation_tolerance_rad": 0.017453292519943295,
     "settle_stable_observations": 3,
     "settle_poll_s": 0.02,
-    "capture_attempt_multiplier": 2.0,
+    "max_attempts": 2,
     # World and lighting.
     "randomize_lighting": True,
     "light_intensity_scale_min": 0.65,
@@ -165,7 +163,7 @@ BASE_ROBOT_HOME = {
 
 LIMITS = {
     "nic_translation": (-0.0215, 0.0234),
-    "nic_yaw": (-math.radians(10.0), math.radians(10.0)),
+    "nic_yaw": (-0.17453292519943295, 0.17453292519943295),
     "sc_translation": (-0.06, 0.055),
     "sfp_board_x": (0.13, 0.17),
     "sfp_board_y": (-0.25, -0.20),

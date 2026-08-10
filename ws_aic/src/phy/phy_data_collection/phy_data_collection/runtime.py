@@ -349,42 +349,39 @@ def _policy_environment(
     _set_optional_env(env, "AIC_PORT_COLLECT_DZ_MAX_MM", args.dz_max_mm)
     env["AIC_PORT_COLLECT_SAMPLING_TIERS_MM"] = args.sampling_tiers_mm
     env["AIC_PORT_COLLECT_SAMPLING_TIER_WEIGHTS"] = args.sampling_tier_weights
-    env["AIC_PORT_COLLECT_ROLL_LIMIT_DEG"] = str(args.port_roll_limit_deg)
-    env["AIC_PORT_COLLECT_PITCH_LIMIT_DEG"] = str(args.port_pitch_limit_deg)
-    env["AIC_PORT_COLLECT_YAW_LIMIT_DEG"] = str(args.port_yaw_limit_deg)
-    _set_optional_env(env, "AIC_PORT_COLLECT_ROLL_MIN_DEG", args.roll_min_deg)
-    _set_optional_env(env, "AIC_PORT_COLLECT_ROLL_MAX_DEG", args.roll_max_deg)
-    _set_optional_env(env, "AIC_PORT_COLLECT_PITCH_MIN_DEG", args.pitch_min_deg)
-    _set_optional_env(env, "AIC_PORT_COLLECT_PITCH_MAX_DEG", args.pitch_max_deg)
-    _set_optional_env(env, "AIC_PORT_COLLECT_YAW_MIN_DEG", args.yaw_min_deg)
-    _set_optional_env(env, "AIC_PORT_COLLECT_YAW_MAX_DEG", args.yaw_max_deg)
+    env["AIC_PORT_COLLECT_ROLL_LIMIT_RAD"] = str(args.port_roll_limit_rad)
+    env["AIC_PORT_COLLECT_PITCH_LIMIT_RAD"] = str(args.port_pitch_limit_rad)
+    env["AIC_PORT_COLLECT_YAW_LIMIT_RAD"] = str(args.port_yaw_limit_rad)
+    _set_optional_env(env, "AIC_PORT_COLLECT_ROLL_MIN_RAD", args.roll_min_rad)
+    _set_optional_env(env, "AIC_PORT_COLLECT_ROLL_MAX_RAD", args.roll_max_rad)
+    _set_optional_env(env, "AIC_PORT_COLLECT_PITCH_MIN_RAD", args.pitch_min_rad)
+    _set_optional_env(env, "AIC_PORT_COLLECT_PITCH_MAX_RAD", args.pitch_max_rad)
+    _set_optional_env(env, "AIC_PORT_COLLECT_YAW_MIN_RAD", args.yaw_min_rad)
+    _set_optional_env(env, "AIC_PORT_COLLECT_YAW_MAX_RAD", args.yaw_max_rad)
     _set_optional_env(env, "AIC_PORT_COLLECT_RPY_NORM_MAX_RAD", args.rpy_norm_max_rad)
     env["AIC_IMG2POS_MIN_VISIBLE_CAMERAS"] = str(args.min_visible_cameras)
-    env["AIC_IMG2POS_VISIBILITY_MARGIN_PX"] = str(args.visibility_margin_px)
     env["AIC_PORT_COLLECT_BASE_Z_OFFSET_M"] = str(args.base_z_offset_mm / 1000.0)
     env["AIC_BOARD_VIEW_DISTANCE_MIN_M"] = str(args.board_distance_min_mm / 1000.0)
     env["AIC_BOARD_VIEW_DISTANCE_MAX_M"] = str(args.board_distance_max_mm / 1000.0)
     env["AIC_BOARD_VIEW_LATERAL_LIMIT_M"] = str(args.board_lateral_limit_mm / 1000.0)
-    env["AIC_BOARD_VIEW_ANGLE_LIMIT_DEG"] = str(args.board_angle_limit_deg)
+    env["AIC_BOARD_VIEW_ANGLE_LIMIT_RAD"] = str(args.board_angle_limit_rad)
     env["AIC_DESCENT_START_DISTANCE_M"] = str(args.descent_start_distance_mm / 1000.0)
     env["AIC_DESCENT_LATERAL_LIMIT_M"] = str(args.descent_lateral_limit_mm / 1000.0)
-    env["AIC_DESCENT_ANGLE_LIMIT_DEG"] = str(args.descent_angle_limit_deg)
+    env["AIC_DESCENT_ANGLE_LIMIT_RAD"] = str(args.descent_angle_limit_rad)
     env["AIC_COLLECT_SYNC_TOLERANCE_MS"] = str(args.sync_tolerance_ms)
     env["AIC_COLLECT_SYNC_WAIT_TIMEOUT_SEC"] = str(args.sync_wait_timeout_s)
     env["AIC_COLLECT_SETTLE_TIMEOUT_SEC"] = str(args.settle_timeout_s)
     env["AIC_COLLECT_SETTLE_POSITION_TOLERANCE_MM"] = str(
         args.settle_position_tolerance_mm
     )
-    env["AIC_COLLECT_SETTLE_ORIENTATION_TOLERANCE_DEG"] = str(
-        args.settle_orientation_tolerance_deg
+    env["AIC_COLLECT_SETTLE_ORIENTATION_TOLERANCE_RAD"] = str(
+        args.settle_orientation_tolerance_rad
     )
     env["AIC_COLLECT_SETTLE_STABLE_OBSERVATIONS"] = str(
         args.settle_stable_observations
     )
     env["AIC_COLLECT_SETTLE_POLL_SEC"] = str(args.settle_poll_s)
-    env["AIC_COLLECT_CAPTURE_ATTEMPT_MULTIPLIER"] = str(
-        args.capture_attempt_multiplier
-    )
+    env["AIC_COLLECT_MAX_ATTEMPTS"] = str(args.max_attempts)
     env["AIC_COLLECT_COLOR_LOG"] = "true" if args.color_log else "false"
     env["RMW_IMPLEMENTATION"] = env.get("RMW_IMPLEMENTATION", "rmw_zenoh_cpp")
     _apply_worker_isolation(env, args)

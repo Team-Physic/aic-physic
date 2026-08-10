@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import random
 import xml.etree.ElementTree as ET
@@ -33,9 +32,9 @@ def _mm(value_m: float) -> str:
     return f"{value_m * 1000.0:+.1f}mm"
 
 
-def _deg(value_rad: float) -> str:
-    """라디안 값을 부호가 포함된 각도 문자열로 변환한다."""
-    return f"{math.degrees(value_rad):+.1f}deg"
+def _rad(value_rad: float) -> str:
+    """라디안 값을 부호와 단위가 포함된 문자열로 만든다."""
+    return f"{value_rad:+.4f}rad"
 
 
 def _vec_mm(values: tuple[float, ...] | list[float]) -> str:
@@ -43,9 +42,9 @@ def _vec_mm(values: tuple[float, ...] | list[float]) -> str:
     return f"({_mm(float(values[0]))}, {_mm(float(values[1]))}, {_mm(float(values[2]))})"
 
 
-def _vec_deg(values: tuple[float, ...] | list[float]) -> str:
-    """3차원 라디안 벡터를 각도 문자열로 변환한다."""
-    return f"({_deg(float(values[0]))}, {_deg(float(values[1]))}, {_deg(float(values[2]))})"
+def _vec_rad(values: tuple[float, ...] | list[float]) -> str:
+    """3차원 라디안 벡터를 단위가 포함된 문자열로 만든다."""
+    return f"({_rad(float(values[0]))}, {_rad(float(values[1]))}, {_rad(float(values[2]))})"
 
 
 def log_trial_randomization(
@@ -76,13 +75,13 @@ def log_trial_randomization(
         float(scenario.get("cable_yaw", 0.0)),
     )
     robot_home = scenario.get("robot_home_joint_positions", {}) or {}
-    joint_delta_deg = {
-        name: math.degrees(float(robot_home.get(name, base)) - float(base))
+    joint_delta_rad = {
+        name: float(robot_home.get(name, base)) - float(base)
         for name, base in BASE_ROBOT_HOME.items()
     }
 
     print(_color(args, f"\n=== Trial {index + 1}/{total}: {task_id} ===", "blue"))
-    board_yaw = _deg(float(scenario.get("board_yaw", 0.0)))
+    board_yaw = _rad(float(scenario.get("board_yaw", 0.0)))
     print(f"{_color(args, '[Task Board]', 'cyan')} xyz={_vec_mm(board_xyz)} yaw={board_yaw}")
     if port_type == "sc":
         port_detail = (
@@ -97,18 +96,18 @@ def log_trial_randomization(
             f"active_rails={scenario.get('active_rails', [])} target_rail={rail_idx} "
             f"port=sfp_port_{int(scenario.get('sfp_port_idx', -1))} "
             f"nic_translation={_mm(float(scenario.get('nic_translation', 0.0)))} "
-            f"nic_yaw={_deg(float(scenario.get('nic_yaw', 0.0)))} "
+            f"nic_yaw={_rad(float(scenario.get('nic_yaw', 0.0)))} "
             "background_sc_translation="
             f"{_mm(float(scenario.get('sc_translation', 0.0)))}"
         )
     print(_color(args, "[Port]", "yellow") + " " + port_detail)
     joint_noise = ", ".join(
-        f"{name}:{value:+.1f}" for name, value in joint_delta_deg.items()
+        f"{name}:{value:+.4f}" for name, value in joint_delta_rad.items()
     )
     cable_label = _color(args, "[Cable / Robot]", "magenta")
     print(
         f"{cable_label} gripper_offset={_vec_mm(gripper_xyz)} "
-        f"cable_rpy={_vec_deg(cable_rpy)} joint_noise_deg={{{joint_noise}}}"
+        f"cable_rpy={_vec_rad(cable_rpy)} joint_noise_rad={{{joint_noise}}}"
     )
 
     sim_parts = [

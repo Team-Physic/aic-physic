@@ -1,9 +1,10 @@
 import argparse
 import json
+import math
 import random
 from collections import Counter
 
-from phy_data_collection import main, runtime
+from phy_data_collection import main, runtime, scenario
 from phy_data_collection.cli import build_parser
 from phy_data_collection.scenario import make_trial_config
 
@@ -13,9 +14,9 @@ def _args(port_type="sfp"):
         port_type=port_type,
         trials=34,
         seed=30,
-        cable_rpy_noise_deg=20.0,
+        cable_rotation_noise_rad=0.04,
         time_limit_s=600,
-        robot_joint_noise_deg=4.0,
+        robot_joint_noise_rad=0.06981317007977318,
         ros_domain_id_base=40,
         zenoh_port_base=7600,
     )
@@ -61,6 +62,25 @@ def test_worker_assignment_preserves_every_global_index_once():
     assert len(flattened) == len(set(flattened))
 
 
+def test_cable_rotation_noise_respects_total_angle_bound():
+    args = _args()
+    base = scenario._quaternion_from_rpy(
+        scenario.LIMITS["cable_roll"],
+        scenario.LIMITS["cable_pitch"],
+        scenario.LIMITS["cable_yaw"],
+    )
+    errors = []
+    for seed in range(100):
+        actual = scenario._quaternion_from_rpy(
+            *scenario._cable_rpy(random.Random(seed), args)
+        )
+        cosine = min(1.0, abs(sum(a * b for a, b in zip(base, actual))))
+        errors.append(2.0 * math.acos(cosine))
+
+    assert max(errors) <= args.cable_rotation_noise_rad + 1e-12
+    assert max(errors) > 0.0
+
+
 def test_policy_environment_contains_trial_index(tmp_path):
     args = build_parser().parse_args(["--dry-run", "--port-type", "sfp"])
     args.seed = 7
@@ -76,6 +96,11 @@ def test_policy_environment_contains_trial_index(tmp_path):
 
     assert env["AIC_PORTOFFSET_TRIAL_INDEX"] == "31"
     assert env["AIC_COLLECT_RANDOM_SEED"] == str(7 + 31 * 1_000_003)
+    assert env["AIC_PORT_COLLECT_ROLL_LIMIT_RAD"] == str(args.port_roll_limit_rad)
+    assert env["AIC_COLLECT_SETTLE_ORIENTATION_TOLERANCE_RAD"] == str(
+        args.settle_orientation_tolerance_rad
+    )
+    assert not any(name.endswith("_DEG") for name in env)
 
 
 def test_metadata_contains_seed_and_total_trials(monkeypatch, tmp_path):

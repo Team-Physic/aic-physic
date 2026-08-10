@@ -285,9 +285,9 @@ def _apply_sample(policy, pose: Pose, port_tf: Transform, state: dict, index: in
         "x_m": sample["x"],
         "y_m": sample["y"],
         "z_m": sample["z"],
-        "roll_deg": float(np.rad2deg(sample["roll"])),
-        "pitch_deg": float(np.rad2deg(sample["pitch"])),
-        "yaw_deg": float(np.rad2deg(sample["yaw"])),
+        "roll_rad": float(sample["roll"]),
+        "pitch_rad": float(sample["pitch"]),
+        "yaw_rad": float(sample["yaw"]),
         "tier_m": sample["tier_m"],
         "distance_m": sample["distance_m"],
     }
@@ -366,9 +366,9 @@ def _board_view_pose(policy, context, index: int):
         "x_m": sample["x"],
         "y_m": sample["y"],
         "z_m": 0.0,
-        "roll_deg": float(np.rad2deg(sample["roll"])),
-        "pitch_deg": float(np.rad2deg(sample["pitch"])),
-        "yaw_deg": float(np.rad2deg(sample["yaw"])),
+        "roll_rad": float(sample["roll"]),
+        "pitch_rad": float(sample["pitch"]),
+        "yaw_rad": float(sample["yaw"]),
         "tier_m": None,
         "distance_m": sample["distance_m"],
     }
@@ -634,17 +634,31 @@ def failure_reason(reason: str) -> str:
 
 def collect(policy, context, get_observation, move_robot) -> bool:
     """선택 정책의 목표 pose 수렴 후 촬영 시점 XYZ label과 image를 저장한다."""
-    max_attempts_per_sample = int(np.ceil(policy.capture_attempt_multiplier))
+    max_attempts_per_sample = policy.max_attempts
+    waypoint_index = 0
     sample_attempts = 0
     while context["counts"]["collect"] < policy.collect_steps:
+        if waypoint_index >= len(policy.samples):
+            replacements = build_samples(policy)
+            if not replacements:
+                policy.get_logger().error(
+                    "[PortOffsetCollect] replacement waypoint generation failed"
+                )
+                return False
+            policy.samples.extend(replacements)
+            policy.get_logger().info(
+                "[PortOffsetCollect] generated replacement waypoints: "
+                f"count={len(replacements)}"
+            )
         if sample_attempts >= max_attempts_per_sample:
             policy.get_logger().error(
                 "[PortOffsetCollect] sample attempts exhausted: "
                 f"sample={context['counts']['collect'] + 1}/{policy.collect_steps}, "
+                f"waypoint={waypoint_index + 1}, "
                 f"attempts={max_attempts_per_sample}"
             )
             return False
-        index = context["counts"]["collect"]
+        index = waypoint_index
         sample_attempts += 1
         context["counts"]["attempts"] += 1
         try:
@@ -670,11 +684,12 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 else f"distance={sample['distance_m']*1e3:.1f}mm"
             )
             policy.get_logger().info(
-                f"COLLECT {index + 1}/{policy.collect_steps} "
+                f"COLLECT {context['counts']['collect'] + 1}/{policy.collect_steps} "
+                f"waypoint={waypoint_index + 1} "
                 f"attempt={sample_attempts}/{max_attempts_per_sample} "
                 f"policy={policy.collection_policy} {tier_text}: "
                 f"xyz=({sample['x_m']*1e3:+.1f}, {sample['y_m']*1e3:+.1f}, {sample['z_m']*1e3:+.1f})mm "
-                f"rpy=({sample['roll_deg']:+.1f}, {sample['pitch_deg']:+.1f}, {sample['yaw_deg']:+.1f})deg"
+                f"rpy=({sample['roll_rad']:+.4f}, {sample['pitch_rad']:+.4f}, {sample['yaw_rad']:+.4f})rad"
             )
             if policy.collection_policy != "near-port":
                 start = _tcp_pose(get_observation())
@@ -717,9 +732,9 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                     policy.log_text(
                         "[PortOffsetCollect] CAPTURE FAILED: pose convergence timeout; "
                         f"motion={settle['position_error_m']*1e3:.3f}mm/"
-                        f"{np.rad2deg(settle['orientation_error_rad']):.3f}deg, "
+                        f"{settle['orientation_error_rad']:.6f}rad, "
                         f"tracking={settle['tracking_position_error_m']*1e3:.3f}mm/"
-                        f"{np.rad2deg(settle['tracking_orientation_error_rad']):.3f}deg",
+                        f"{settle['tracking_orientation_error_rad']:.6f}rad",
                         "red",
                     )
                 )
@@ -727,11 +742,11 @@ def collect(policy, context, get_observation, move_robot) -> bool:
             policy.get_logger().info(
                 "[PortOffsetCollect] pose settled: "
                 f"motion={settle['position_error_m']*1e3:.3f}mm/"
-                f"{np.rad2deg(settle['orientation_error_rad']):.3f}deg, "
+                f"{settle['orientation_error_rad']:.6f}rad, "
                 f"tracking={settle['tracking_position_error_m']*1e3:.3f}mm/"
-                f"{np.rad2deg(settle['tracking_orientation_error_rad']):.3f}deg, "
+                f"{settle['tracking_orientation_error_rad']:.6f}rad, "
                 f"command_clamp_delta={settle['command_position_delta_m']*1e3:.3f}mm/"
-                f"{np.rad2deg(settle['command_orientation_delta_rad']):.3f}deg"
+                f"{settle['command_orientation_delta_rad']:.6f}rad"
             )
             observation, timestamps = dataset.wait_for_observation(
                 policy, get_observation, settled_stamp
@@ -830,6 +845,7 @@ def collect(policy, context, get_observation, move_robot) -> bool:
             )
             if saved:
                 context["counts"]["collect"] += 1
+                waypoint_index += 1
                 sample_attempts = 0
                 policy.get_logger().info(
                     policy.log_text(
@@ -838,6 +854,16 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                         "green",
                     )
                 )
+            elif dataset.is_port_visibility_failure(detail):
+                policy.get_logger().info(
+                    policy.log_text(
+                        "[PortOffsetCollect] WAYPOINT SKIPPED: "
+                        f"{detail}; moving to waypoint {waypoint_index + 2}",
+                        "cyan",
+                    )
+                )
+                waypoint_index += 1
+                sample_attempts = 0
             else:
                 policy.get_logger().error(policy.log_text(f"[PortOffsetCollect] CAPTURE FAILED: {detail}", "red"))
         except TransformException as exc:

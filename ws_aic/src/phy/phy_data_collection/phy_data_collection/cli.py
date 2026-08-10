@@ -63,8 +63,8 @@ def _add_trial_args(parser: argparse.ArgumentParser) -> None:
         help="Expert override for the ROS policy module selected by --collection-policy.",
     )
     _add_argument(parser, "policy_start_wait_s", type=float)
-    _add_argument(parser, "robot_joint_noise_deg", type=float)
-    _add_argument(parser, "cable_rpy_noise_deg", type=float)
+    _add_argument(parser, "robot_joint_noise_rad", type=float)
+    _add_argument(parser, "cable_rotation_noise_rad", type=float)
 
 
 def _add_dataset_args(parser: argparse.ArgumentParser) -> None:
@@ -102,25 +102,24 @@ def _add_pose_args(parser: argparse.ArgumentParser) -> None:
         "dy_max_mm",
         "dz_min_mm",
         "dz_max_mm",
-        "port_roll_limit_deg",
-        "port_pitch_limit_deg",
-        "port_yaw_limit_deg",
-        "roll_min_deg",
-        "roll_max_deg",
-        "pitch_min_deg",
-        "pitch_max_deg",
-        "yaw_min_deg",
-        "yaw_max_deg",
+        "port_roll_limit_rad",
+        "port_pitch_limit_rad",
+        "port_yaw_limit_rad",
+        "roll_min_rad",
+        "roll_max_rad",
+        "pitch_min_rad",
+        "pitch_max_rad",
+        "yaw_min_rad",
+        "yaw_max_rad",
         "rpy_norm_max_rad",
         "base_z_offset_mm",
         "board_distance_min_mm",
         "board_distance_max_mm",
         "board_lateral_limit_mm",
-        "board_angle_limit_deg",
+        "board_angle_limit_rad",
         "descent_start_distance_mm",
         "descent_lateral_limit_mm",
-        "descent_angle_limit_deg",
-        "visibility_margin_px",
+        "descent_angle_limit_rad",
     ):
         _add_argument(parser, name, type=float)
     _add_argument(parser, "min_visible_cameras", type=int)
@@ -134,10 +133,10 @@ def _add_sync_args(parser: argparse.ArgumentParser) -> None:
     _add_argument(parser, "sync_wait_timeout_s", type=float)
     _add_argument(parser, "settle_timeout_s", type=float)
     _add_argument(parser, "settle_position_tolerance_mm", type=float)
-    _add_argument(parser, "settle_orientation_tolerance_deg", type=float)
+    _add_argument(parser, "settle_orientation_tolerance_rad", type=float)
     _add_argument(parser, "settle_stable_observations", type=int)
     _add_argument(parser, "settle_poll_s", type=float)
-    _add_argument(parser, "capture_attempt_multiplier", type=float)
+    _add_argument(parser, "max_attempts", type=int)
 
 
 def _add_world_args(parser: argparse.ArgumentParser) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,6 +21,16 @@ from phy_policy.data_generator.geometry import pose_matrix, quaternion_matrix
 
 
 SFP_REFERENCE_OFFSET = np.array([0.0, 0.0021125, 0.0], dtype=float)
+PORT_VISIBILITY_FAILURE_PREFIX = "포트 가시성 부족:"
+ROBOT_ARM_OCCLUSION_REASON = "robot_arm_occlusion"
+ROBOT_ARM_DARK_THRESHOLD = 40
+ROBOT_ARM_MIN_AREA_RATIO = 0.01
+ROBOT_ARM_MASK_DILATION_PX = 8
+
+
+def is_port_visibility_failure(detail: str) -> bool:
+    """sample 저장 실패가 port 가시성 조건 때문인지 반환한다."""
+    return detail.startswith(PORT_VISIBILITY_FAILURE_PREFIX)
 
 
 def image_for_camera(observation, camera: str):
@@ -80,7 +91,6 @@ def _points_projection(
         ]
     except Exception as exc:
         return {"visible": False, "reason": f"camera_transform_error: {exc}"}
-    margin = policy.visibility_margin_px
     projections = []
     for point_camera in points_camera:
         depth = float(point_camera[2])
@@ -89,27 +99,63 @@ def _points_projection(
         u = float(intrinsic[0, 0] * point_camera[0] / depth + intrinsic[0, 2])
         v = float(intrinsic[1, 1] * point_camera[1] / depth + intrinsic[1, 2])
         projections.append({"u_px": u, "v_px": v, "depth_m": depth})
+    visible = all(
+        0.0 <= projection["u_px"] < float(message.width)
+        and 0.0 <= projection["v_px"] < float(message.height)
+        for projection in projections
+    )
     return {
-        "visible": all(
-            margin <= u < float(message.width) - margin
-            and margin <= v < float(message.height) - margin
-            for u, v in (
-                (projection["u_px"], projection["v_px"])
-                for projection in projections
-            )
-        ),
+        "visible": visible,
+        "reason": "visible" if visible else "outside_image_bounds",
         "points": projections,
+        "image_size_px": [int(message.width), int(message.height)],
     }
 
 
+def _robot_arm_mask(image: np.ndarray) -> np.ndarray:
+    """영상 아래쪽에 연결된 큰 검은 영역을 robot arm mask로 반환한다."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    dark = (gray <= ROBOT_ARM_DARK_THRESHOLD).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(dark, connectivity=8)
+    height, width = gray.shape
+    minimum_area = int(height * width * ROBOT_ARM_MIN_AREA_RATIO)
+    mask = np.zeros_like(dark)
+    for label in range(1, count):
+        _, y, _, component_height, area = stats[label]
+        if y + component_height < height or area < minimum_area:
+            continue
+        component = np.where(labels == label, 255, 0).astype(np.uint8)
+        contours, _ = cv2.findContours(
+            component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        cv2.drawContours(mask, contours, -1, 1, thickness=cv2.FILLED)
+    if np.any(mask):
+        size = ROBOT_ARM_MASK_DILATION_PX * 2 + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+        mask = cv2.dilate(mask, kernel)
+    return mask.astype(bool)
+
+
 def _port_projection(policy, observation, camera: str, port_tf: Transform) -> dict[str, Any]:
-    """포트 위치가 지정 camera의 유효 영상 영역에 보이는지 검사한다."""
-    return _points_projection(
+    """포트 투영점이 유효 영상 안에 있고 검은 robot arm에 가리지 않는지 검사한다."""
+    result = _points_projection(
         policy,
         observation,
         camera,
         [[port_tf.translation.x, port_tf.translation.y, port_tf.translation.z]],
     )
+    if not result.get("visible", False):
+        return result
+    image = image_to_bgr(policy, image_for_camera(observation, camera), camera)
+    if image is None:
+        return {**result, "visible": False, "reason": "image_conversion_failed"}
+    point = result["points"][0]
+    u = int(np.clip(round(point["u_px"]), 0, image.shape[1] - 1))
+    v = int(np.clip(round(point["v_px"]), 0, image.shape[0] - 1))
+    mask = _robot_arm_mask(image)
+    if mask[v, u]:
+        return {**result, "visible": False, "reason": ROBOT_ARM_OCCLUSION_REASON}
+    return result
 
 
 def _stamp_ns(stamp) -> int | None:
@@ -319,6 +365,81 @@ def _connector(task) -> str:
     return "SC" if "sc" in text else "UNKNOWN"
 
 
+def _last_number(value: Any, default: str = "x") -> str:
+    """문자열의 마지막 숫자 묶음을 반환한다."""
+    matches = re.findall(r"\d+", str(value))
+    return matches[-1] if matches else default
+
+
+def _trial_index(policy, task) -> int:
+    """policy 또는 task ID에서 숫자 trial index를 반환한다."""
+    trial_index = getattr(policy, "trial_index", None)
+    if trial_index in (None, ""):
+        trial_match = re.search(
+            r"portoffset_(?:sfp|sc)_(\d+)", str(getattr(task, "id", ""))
+        )
+        trial_index = int(trial_match.group(1)) if trial_match else 0
+    return int(trial_index)
+
+
+def _card_mask(task) -> str:
+    """task ID bitmask를 rail 0부터 읽는 순서로 뒤집어 반환한다."""
+    match = re.search(r"(?:^|_)cards(\d+)(?:_|$)", str(getattr(task, "id", "")))
+    return match.group(1)[::-1] if match else "unknown"
+
+
+def _compact_capture_id(policy, episode_name: str, task, step_idx: int) -> str:
+    """시간, trial, 목표 port와 sample만 남긴 짧은 capture ID를 만든다."""
+    timestamp_match = re.match(r"(\d{8})_(\d{6})", episode_name)
+    timestamp = (
+        f"{timestamp_match.group(1)}-{timestamp_match.group(2)}"
+        if timestamp_match
+        else str(int(time.time()))
+    )
+    trial_index = _trial_index(policy, task)
+    connector = _connector(task).lower()
+    rail = _last_number(getattr(task, "target_module_name", ""))
+    target = f"{connector}-r{rail}"
+    if connector == "sfp":
+        port = _last_number(getattr(task, "port_name", ""))
+        target += f"-p{port}"
+    return f"{timestamp}_t{trial_index:04d}_{target}_s{step_idx:03d}"
+
+
+def _image_relative_path(policy, task, step_idx: int, split: str, camera: str) -> Path:
+    """사람이 읽기 쉬운 camera별 trial image 상대 경로를 만든다."""
+    connector = _connector(task).lower()
+    rail = _last_number(getattr(task, "target_module_name", ""))
+    target = f"{connector}_card_{_card_mask(task)}_rail{rail}"
+    if connector == "sfp":
+        port = _last_number(getattr(task, "port_name", ""))
+        target += f"_port{port}"
+    trial_dir = f"trial_{_trial_index(policy, task):03d}"
+    filename = f"{target}_num{step_idx + 1:03d}_{camera}.jpg"
+    return Path("images") / split / camera / trial_dir / filename
+
+
+def _visibility_detail(visibility: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """모든 camera의 가시성 결과를 동일한 log 구조로 정리한다."""
+    detail = {}
+    for camera, result in visibility.items():
+        camera_detail: dict[str, Any] = {
+            "visible": bool(result.get("visible", False)),
+            "reason": result.get("reason")
+            or ("visible" if result.get("visible", False) else "unknown"),
+        }
+        points = result.get("points", ())
+        if points:
+            camera_detail["projection_px"] = [
+                [round(point["u_px"], 1), round(point["v_px"], 1)]
+                for point in points
+            ]
+        if result.get("image_size_px"):
+            camera_detail["image_size_px"] = result["image_size_px"]
+        detail[camera] = camera_detail
+    return detail
+
+
 def _max_skew(timestamps: dict[str, Any]) -> int:
     """승인 source들의 최대 시각 차이를 반환한다."""
     try:
@@ -355,7 +476,7 @@ def write_manifest(policy) -> None:
                 f"[{policy.board_distance_range[0] * 1000.0:g}, "
                 f"{policy.board_distance_range[1] * 1000.0:g}]",
                 f"  lateral_limit_mm: {policy.board_lateral_limit * 1000.0:g}",
-                f"  angle_limit_deg: {np.rad2deg(policy.board_angle_limit):g}",
+                f"  angle_limit_rad: {policy.board_angle_limit:g}",
             ]
         )
     elif policy.collection_policy == "descent":
@@ -365,7 +486,7 @@ def write_manifest(policy) -> None:
                 f"[{policy.descent_start_distance * 1000.0:g}, "
                 f"{policy.base_z_offset * 1000.0:g}]",
                 f"  lateral_limit_mm: {policy.descent_lateral_limit * 1000.0:g}",
-                f"  angle_limit_deg: {np.rad2deg(policy.descent_angle_limit):g}",
+                f"  angle_limit_rad: {policy.descent_angle_limit:g}",
             ]
         )
     else:
@@ -376,14 +497,14 @@ def write_manifest(policy) -> None:
         )
     content = "\n".join(
         [
-            "schema_version: 4",
+            "schema_version: 5",
             "task: img2pos",
             f"version: {policy.dataset_version or 'default'}",
             "sample_unit: synchronized_capture",
             "input: synchronized_rgb_images",
             "samples: samples.jsonl",
             "metadata: metadata.jsonl",
-            "image_layout: images/<split>/<camera>/*.jpg",
+            "image_layout: images/<split>/<camera>/trial_<index>/*.jpg",
             "cameras: [left, center, right]",
             "target:",
             "  name: correction_xyz",
@@ -432,27 +553,28 @@ def save_sample(
         camera: _port_projection(policy, observation, camera, port_tf)
         for camera in ("left", "center", "right")
     }
+    arm_occluded = [
+        camera
+        for camera, result in visibility.items()
+        if result.get("reason") == ROBOT_ARM_OCCLUSION_REASON
+    ]
     visible = [
         camera for camera, result in visibility.items() if result.get("visible", False)
     ]
     required_cameras = policy.min_visible_cameras
     if len(visible) < required_cameras:
-        detail = {
-            camera: result.get("reason")
-            or [
-                [round(point["u_px"], 1), round(point["v_px"], 1)]
-                for point in result.get("points", ())
-            ]
-            for camera, result in visibility.items()
-        }
+        detail = _visibility_detail(visibility)
+        occlusion = (
+            f", robot_arm_occlusion={arm_occluded}" if arm_occluded else ""
+        )
         return False, (
-            f"포트 가시성 부족: visible={visible}, "
-            f"required={required_cameras}, projection={detail}"
+            f"{PORT_VISIBILITY_FAILURE_PREFIX} visible={visible}{occlusion}, "
+            f"required={required_cameras}, cameras={detail}"
         )
 
     trial_id = _trial_id(policy, episode_name)
     split = split_for_trial(policy, trial_id)
-    capture_id = f"{episode_name}_collect_{step_idx:06d}"
+    capture_id = _compact_capture_id(policy, episode_name, task, step_idx)
     images: dict[str, str] = {}
     written: list[Path] = []
     failures: list[str] = []
@@ -461,14 +583,15 @@ def save_sample(
         if image is None:
             failures.append(f"{camera}: image 변환 실패")
             continue
-        path = policy.dataset_dir / "images" / split / camera / f"{capture_id}_{camera}.jpg"
+        relative_path = _image_relative_path(policy, task, step_idx, split, camera)
+        path = policy.dataset_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         if not cv2.imwrite(str(path), image):
             path.unlink(missing_ok=True)
             failures.append(f"{camera}: JPEG 저장 실패 ({path})")
             continue
         written.append(path)
-        images[camera] = str(path.relative_to(policy.dataset_dir))
+        images[camera] = str(relative_path)
     if len(images) != len(visibility):
         for path in written:
             path.unlink(missing_ok=True)
@@ -491,9 +614,7 @@ def save_sample(
         "capture_stamp_ns": capture_stamp,
         "max_sync_skew_ns": _max_skew(timestamps),
         "settle_position_error_mm": float(settle["position_error_m"] * 1000.0),
-        "settle_orientation_error_deg": float(
-            np.rad2deg(settle["orientation_error_rad"])
-        ),
+        "settle_orientation_error_rad": float(settle["orientation_error_rad"]),
         "settle_wait_ms": float(settle["wait_ns"] / 1e6),
     }
     try:
@@ -505,7 +626,12 @@ def save_sample(
             path.unlink(missing_ok=True)
         return False, f"samples.jsonl 저장 실패: {exc}"
     policy.capture_count += 1
+    occlusion = (
+        f", robot_arm_occlusion={arm_occluded}, cameras={_visibility_detail(visibility)}"
+        if arm_occluded
+        else ""
+    )
     return True, (
-        f"capture_id={capture_id}, cameras={sorted(images)}, "
-        f"saved_count={policy.capture_count}"
+        f"capture_id={capture_id}, cameras={sorted(images)}, visible={visible}"
+        f"{occlusion}, saved_count={policy.capture_count}"
     )

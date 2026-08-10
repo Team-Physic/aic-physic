@@ -144,14 +144,17 @@ class PortOffsetCollect(Policy):
         )
         self.settle_orientation_tolerance_rad = max(
             0.0,
-            np.deg2rad(_env_float("AIC_COLLECT_SETTLE_ORIENTATION_TOLERANCE_DEG", 1.0)),
+            _env_float(
+                "AIC_COLLECT_SETTLE_ORIENTATION_TOLERANCE_RAD",
+                0.017453292519943295,
+            ),
         )
         self.settle_stable_observations = max(
             1, int(os.environ.get("AIC_COLLECT_SETTLE_STABLE_OBSERVATIONS", "3"))
         )
         self.settle_poll_s = max(0.001, _env_float("AIC_COLLECT_SETTLE_POLL_SEC", 0.02))
-        self.capture_attempt_multiplier = max(
-            1.0, _env_float("AIC_COLLECT_CAPTURE_ATTEMPT_MULTIPLIER", 2.0)
+        self.max_attempts = max(
+            1, int(_env_float("AIC_COLLECT_MAX_ATTEMPTS", 2.0))
         )
         self.color_log = _env_bool("AIC_COLLECT_COLOR_LOG", True) and not os.environ.get("NO_COLOR")
         self.rng = np.random.default_rng(
@@ -174,7 +177,7 @@ class PortOffsetCollect(Policy):
         )
         self.board_angle_limit = max(
             0.0,
-            np.deg2rad(_env_float("AIC_BOARD_VIEW_ANGLE_LIMIT_DEG", 15.0)),
+            _env_float("AIC_BOARD_VIEW_ANGLE_LIMIT_RAD", 0.2617993877991494),
         )
         self.descent_start_distance = max(
             self.base_z_offset,
@@ -185,7 +188,7 @@ class PortOffsetCollect(Policy):
         )
         self.descent_angle_limit = max(
             0.0,
-            np.deg2rad(_env_float("AIC_DESCENT_ANGLE_LIMIT_DEG", 20.0)),
+            _env_float("AIC_DESCENT_ANGLE_LIMIT_RAD", 0.3490658503988659),
         )
 
         self.dataset_dir = Path(
@@ -198,23 +201,21 @@ class PortOffsetCollect(Policy):
         self.val_ratio = _env_float("AIC_IMG2POS_VAL_RATIO", 0.15)
         self.test_ratio = _env_float("AIC_IMG2POS_TEST_RATIO", 0.15)
         self.trial_split = os.environ.get("AIC_IMG2POS_TRIAL_SPLIT", "").strip().lower()
-        self.visibility_margin_px = _env_float("AIC_IMG2POS_VISIBILITY_MARGIN_PX", 64.0)
         self.min_visible_cameras = max(1, int(os.environ.get("AIC_IMG2POS_MIN_VISIBLE_CAMERAS", "2")))
         self.capture_count = 0
         self.record = _env_bool("AIC_IMG2POS_RECORD", True)
         xy_limit = _env_float("AIC_PORT_COLLECT_XY_LIMIT_MM", 50.0) / 1000.0
         z_limit = _env_float("AIC_PORT_COLLECT_Z_LIMIT_MM", 50.0) / 1000.0
-        degree = np.pi / 180.0
-        roll_limit = _env_float("AIC_PORT_COLLECT_ROLL_LIMIT_DEG", 25.0) * degree
-        pitch_limit = _env_float("AIC_PORT_COLLECT_PITCH_LIMIT_DEG", 25.0) * degree
-        yaw_limit = _env_float("AIC_PORT_COLLECT_YAW_LIMIT_DEG", 35.0) * degree
+        roll_limit = _env_float("AIC_PORT_COLLECT_ROLL_LIMIT_RAD", 0.4363323129985824)
+        pitch_limit = _env_float("AIC_PORT_COLLECT_PITCH_LIMIT_RAD", 0.4363323129985824)
+        yaw_limit = _env_float("AIC_PORT_COLLECT_YAW_LIMIT_RAD", 0.6108652381980153)
         self.sample_ranges = {
             "x": _range_from_env("AIC_PORT_COLLECT_DX_MIN_MM", "AIC_PORT_COLLECT_DX_MAX_MM", -xy_limit, xy_limit, 0.001),
             "y": _range_from_env("AIC_PORT_COLLECT_DY_MIN_MM", "AIC_PORT_COLLECT_DY_MAX_MM", -xy_limit, xy_limit, 0.001),
             "z": _range_from_env("AIC_PORT_COLLECT_DZ_MIN_MM", "AIC_PORT_COLLECT_DZ_MAX_MM", 0.0, z_limit, 0.001),
-            "roll": _range_from_env("AIC_PORT_COLLECT_ROLL_MIN_DEG", "AIC_PORT_COLLECT_ROLL_MAX_DEG", -roll_limit, roll_limit, degree),
-            "pitch": _range_from_env("AIC_PORT_COLLECT_PITCH_MIN_DEG", "AIC_PORT_COLLECT_PITCH_MAX_DEG", -pitch_limit, pitch_limit, degree),
-            "yaw": _range_from_env("AIC_PORT_COLLECT_YAW_MIN_DEG", "AIC_PORT_COLLECT_YAW_MAX_DEG", -yaw_limit, yaw_limit, degree),
+            "roll": _range_from_env("AIC_PORT_COLLECT_ROLL_MIN_RAD", "AIC_PORT_COLLECT_ROLL_MAX_RAD", -roll_limit, roll_limit, 1.0),
+            "pitch": _range_from_env("AIC_PORT_COLLECT_PITCH_MIN_RAD", "AIC_PORT_COLLECT_PITCH_MAX_RAD", -pitch_limit, pitch_limit, 1.0),
+            "yaw": _range_from_env("AIC_PORT_COLLECT_YAW_MIN_RAD", "AIC_PORT_COLLECT_YAW_MAX_RAD", -yaw_limit, yaw_limit, 1.0),
         }
         self.rpy_norm_max = max(0.0, _env_float("AIC_PORT_COLLECT_RPY_NORM_MAX_RAD", 0.0))
         tiers = [

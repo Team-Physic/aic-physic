@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import multiprocessing
 import os
 import random
@@ -397,13 +398,20 @@ def _prepare_args(args: argparse.Namespace) -> None:
     if args.descent_start_distance_mm < args.base_z_offset_mm:
         raise ValueError("descent-start-distance-mm must preserve base-z-offset-mm clearance")
     if min(
+        args.robot_joint_noise_rad,
+        args.cable_rotation_noise_rad,
+        args.port_roll_limit_rad,
+        args.port_pitch_limit_rad,
+        args.port_yaw_limit_rad,
         args.board_lateral_limit_mm,
-        args.board_angle_limit_deg,
+        args.board_angle_limit_rad,
         args.descent_lateral_limit_mm,
-        args.descent_angle_limit_deg,
-        args.visibility_margin_px,
+        args.descent_angle_limit_rad,
+        args.settle_orientation_tolerance_rad,
     ) < 0.0:
-        raise ValueError("policy limits and visibility margins must be non-negative")
+        raise ValueError("angle noise and policy limits must be non-negative")
+    if args.cable_rotation_noise_rad > math.pi:
+        raise ValueError("cable-rotation-noise-rad must not exceed pi")
     if not 1 <= args.min_visible_cameras <= 3:
         raise ValueError("min-visible-cameras must be in [1, 3]")
     if not args.policy.strip():
@@ -412,16 +420,13 @@ def _prepare_args(args: argparse.Namespace) -> None:
         raise ValueError("worker ROS domain IDs must be in [0, 232]")
     if args.zenoh_port_base < 1024 or args.zenoh_port_base + args.workers - 1 > 65535:
         raise ValueError("worker Zenoh ports must be in [1024, 65535]")
-    if args.settle_stable_observations < 1 or args.capture_attempt_multiplier < 1.0:
-        raise ValueError("settle-stable-observations and capture-attempt-multiplier are invalid")
+    if args.settle_stable_observations < 1 or args.max_attempts < 1:
+        raise ValueError("settle-stable-observations and max-attempts are invalid")
     if args.cleanup_only:
         return
     if not args.dataset_version.strip():
         args.dataset_version = f"img2pos-{time.strftime('%Y%m%d-%H%M%S')}"
         print(f"[dataset] generated version: {args.dataset_version}")
-    if args.workers > 1:
-        args.headless = True
-        args.launch_rviz = False
     target = dataset_dir(args)
     if not args.dry_run and target.exists() and any(target.iterdir()) and not args.resume:
         raise ValueError(

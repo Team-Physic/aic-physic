@@ -14,11 +14,11 @@ cd ws_aic/src
 
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
-  --collection-policy near-port \
+  --collection-policy board-view \
   --port-type sfp \
-  --trials 34 \
-  --workers 2 \
-  --samples-per-trial 40 \
+  --trials 155 \
+  --workers 5 \
+  --samples-per-trial 20 \
   --dataset-version img2pos-v1 \
   --push-to-hub false \
   --record-rosbag false
@@ -66,18 +66,38 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--port-type` | 필수 | 모든 trial에서 사용할 connector: `sfp` 또는 `sc` |
 | `--trials` | `34` | 실행할 전체 trial 수 |
 | `--workers` | `1` | 동시에 실행할 격리 simulator 수 |
+| `--color-log {true,false}` | `true` | terminal ANSI 색상 로그 사용 여부 |
 | `--samples-per-trial` | `40` | trial마다 저장할 capture 수 |
+| `--time-limit-s` | `600` | AIC trial config에 전달할 제한시간(초) |
+| `--trial-timeout-s` | 자동 (`780`) | runner가 summary를 기다리는 시간; 미지정 시 `time-limit-s + 180` |
 | `--collection-policy` | `near-port` | `board-view`, `descent`, `near-port` 중 선택 |
+| `--policy` | 정책별 자동 선택 | `collection-policy`에 연결된 ROS policy module을 직접 override |
+| `--policy-start-wait-s` | `5` | simulator 시작 뒤 policy를 실행하기 전 대기시간(초) |
 | `--dataset-version` | 자동 생성 | `ws_aic/data/img2pos/` 아래 새 version 경로 |
 | `--resume` | 꺼짐 | 기존 version에 명시적으로 이어서 수집 |
 | `--val-ratio`, `--test-ratio` | `0.15`, `0.15` | trial 단위 validation/test 비율 |
-| `--headless` | 켜짐 | Gazebo GUI 비활성화; `--no-headless`로 해제 |
-| `--launch-rviz` | `false` | RViz 실행 여부 |
+| `--headless`, `--no-headless` | `--headless` | Gazebo GUI 비활성화/활성화; `workers=1`일 때만 `--no-headless`가 적용됨 |
+| `--launch-rviz {true,false}` | `false` | RViz 실행 여부; headless 또는 병렬 실행이면 항상 꺼짐 |
 | `--distrobox` | `aic_eval_physic` | eval container 이름 |
+| `--engine-setup` | `/ws_aic/install/setup.bash` | 호환용 parser 옵션; 현재 simulator launch도 이 기본 경로를 고정 source함 |
+| `--ros-domain-id-base` | `40` | worker 0의 ROS domain ID |
+| `--zenoh-port-base` | `7600` | worker 0의 Zenoh router TCP port |
+| `--worker-start-delay-s` | `2` | 병렬 worker 시작 간격(초) |
+| `--robot-joint-noise-rad` | `0.069813` | home joint 각 축의 독립 대칭 잡음 범위 |
+| `--cable-rotation-noise-rad` | `0.04` | 기준 cable 자세 대비 전체 회전각 상한 |
 
 dataset version을 생략하면 실행 시각으로 새 이름을 만들고, 기존 version은 `--resume`
 없이는 수정하지 않습니다. 따라서 Hugging Face의 기존 PoC branch도 자동으로 덮어쓰지
 않습니다.
+
+Cable 회전 잡음은 roll/pitch/yaw 각 축에 독립적으로 더하지 않습니다. 무작위
+회전축과 `0~--cable-rotation-noise-rad` 회전각으로 quaternion을 만들어
+기준 cable 자세에 합성하므로, 전체 상대 회전 오차는 기본 `0.04rad` 이하입니다.
+
+Boolean 옵션 형식은 세 종류입니다. `--headless`만 `--headless`/`--no-headless` 쌍을
+사용합니다. `--color-log`, `--launch-rviz`, `--push-to-hub`, `--record-rosbag`,
+`--randomize-lighting`에는 `true` 또는 `false` 값을 반드시 붙입니다. `--resume`,
+`--hf-private`, `--cleanup`, `--cleanup-only`, `--dry-run`은 옵션이 있으면 켜지는 flag입니다.
 
 ### 병렬 headless 실행
 
@@ -96,7 +116,8 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 ```
 
 `--workers`를 늘리면 Gazebo마다 CPU, RAM과 GPU VRAM을 별도로 사용합니다. 먼저 2개로
-확인하고 자원 여유에 따라 늘리십시오. 병렬 모드에서는 GUI와 RViz가 항상 꺼집니다.
+확인하고 자원 여유에 따라 늘리십시오. 병렬 모드에서는 `--no-headless`나
+`--launch-rviz true`를 전달해도 GUI와 RViz가 항상 꺼집니다.
 `--ros-domain-id-base`, `--zenoh-port-base`, `--worker-start-delay-s`로 격리 값을 조정할
 수 있습니다.
 
@@ -128,18 +149,20 @@ SC:  Uniform({01, 10, 11})
 | `--dz-min-mm`, `--dz-max-mm` | `0`, `50` | 최소 안전거리에 더하는 비관통 방향 port-local Z 범위 |
 | `--sampling-tiers-mm` | `50,10,5,2` | coarse 및 근접 위치 sampling tier |
 | `--sampling-tier-weights` | `1,1,1,1` | tier별 capture quota 비율 |
-| `--port-roll-limit-deg` | `25` | 대칭 roll 범위 |
-| `--port-pitch-limit-deg` | `25` | 대칭 pitch 범위 |
-| `--port-yaw-limit-deg` | `35` | 대칭 yaw 범위 |
-| `--roll-min-deg` … `--yaw-max-deg` | 미지정 | 비대칭 RPY 범위 override |
+| `--port-roll-limit-rad` | `0.436332` | 대칭 roll 범위 |
+| `--port-pitch-limit-rad` | `0.436332` | 대칭 pitch 범위 |
+| `--port-yaw-limit-rad` | `0.610865` | 대칭 yaw 범위 |
+| `--roll-min-rad`, `--roll-max-rad` | 미지정 | 비대칭 roll 범위 override |
+| `--pitch-min-rad`, `--pitch-max-rad` | 미지정 | 비대칭 pitch 범위 override |
+| `--yaw-min-rad`, `--yaw-max-rad` | 미지정 | 비대칭 yaw 범위 override |
 | `--rpy-norm-max-rad` | 미지정 | 생성된 RPY vector norm 상한 |
 | `--base-z-offset-mm` | `20` | descent/near-port가 유지할 접근축 최소 안전거리 |
 | `--board-distance-min-mm`, `--board-distance-max-mm` | `750`, `850` | board-view center camera optical 거리 범위 |
 | `--board-lateral-limit-mm` | `30` | board-view camera-plane X/Y 대칭 범위 |
-| `--board-angle-limit-deg` | `15` | board-view RPY 대칭 범위 |
+| `--board-angle-limit-rad` | `0.261799` | board-view RPY 대칭 범위 |
 | `--descent-start-distance-mm` | `550` | descent 시작 거리 |
 | `--descent-lateral-limit-mm` | `40` | descent port-local X/Y 대칭 범위 |
-| `--descent-angle-limit-deg` | `20` | descent RPY 대칭 범위 |
+| `--descent-angle-limit-rad` | `0.349066` | descent RPY 대칭 범위 |
 
 기본 40 capture는 각 tier에 10개씩 배정됩니다. X/Y는 `±tier`, Z는 20mm 최소
 안전거리에 `0~tier`를 더하고 RPY 범위도 tier 비율로 축소합니다. 첫 sample의 추가
@@ -153,22 +176,27 @@ translation과 RPY는 모두 0이지만 port와의 안전거리 20mm는 유지�
 | 옵션 | 기본값 | 설명 |
 | --- | ---: | --- |
 | `--min-visible-cameras` | `2` | 저장에 필요한 최소 가시 camera 수 |
-| `--visibility-margin-px` | `64` | 영상 경계에서 제외할 여백 |
 | `--sync-tolerance-ms` | `30` | capture stamp와 controller/동적 TF 최대 시각 차이 |
 | `--sync-wait-timeout-s` | `1` | 새 Observation과 capture 시각 TF 대기시간 |
 | `--settle-timeout-s` | `8` | reference와 실제 TCP 움직임 수렴 제한시간 |
 | `--settle-position-tolerance-mm` | `1` | 연속 controller frame 간 TCP 위치 이동 허용량 |
-| `--settle-orientation-tolerance-deg` | `1` | 연속 controller frame 간 TCP 자세 이동 허용량 |
+| `--settle-orientation-tolerance-rad` | `0.0174533` | 연속 controller frame 간 TCP 자세 이동 허용량 |
 | `--settle-stable-observations` | `3` | 연속으로 통과해야 하는 서로 다른 controller frame 수 |
-| `--capture-attempt-multiplier` | `2` | 각 sample의 capture 시도 상한 |
+| `--settle-poll-s` | `0.02` | pose 수렴 여부를 다시 확인하는 polling 간격(초) |
+| `--max-attempts` | `2` | 가시성 실패를 제외한 동일 waypoint의 최대 capture 시도 횟수 |
 
 세 image의 `header.stamp`가 정확히 같고 controller가 허용 오차 안에 있는 Observation만
 사용합니다. 공통 capture stamp로 plug TF를 한 번 조회하여 하나의 `target_xyz_m`을
 계산합니다.
 모든 collection policy에서 목표 port가 지정 개수 이상의 camera에 보일 때만 승인합니다.
-승인된 capture는 port 가시성 여부와 관계없이 동기화된 left/center/right 이미지 3장과
-공통 `target_xyz_m`을 한 묶음으로 저장합니다. 이미지 한 장이라도 저장하지 못하면 partial
-capture를 삭제하고 재시도합니다. `descent`와
+승인된 capture는 일부 camera에서 port가 보이지 않더라도 동기화된 left/center/right 이미지 3장과
+공통 `target_xyz_m`을 한 묶음으로 저장합니다. 영상 아래쪽 경계에 연결된 큰 검은 영역은
+robot arm으로 판정하며, 이 영역에 가리지 않고 실제 image 범위 안에 투영된 camera만 가시
+camera 수에 포함합니다. 따라서 한 camera가 robot arm에 가려져도 다른 두 camera에서 보이면
+capture를 승인합니다. 이미지 한 장이라도 저장하지 못하면 partial
+capture를 삭제하고 재시도합니다. port 가시성 조건을 통과하지 못하면 같은 waypoint를
+반복하지 않고 다음 waypoint로 이동합니다. 준비된 waypoint를 모두 사용해도 저장된
+capture 수가 목표보다 적으면 새 waypoint 묶음을 생성해 계속 수집합니다. `descent`와
 `near-port`는 실제 TF의 접근축 거리가 20mm 이상인지 검사하고, `near-port`는 추가로
 20mm 안전거리를 제외한 port-local offset이 배정된 sampling tier 안에 있는지도
 검사합니다. 명령 직후 frame은
@@ -191,6 +219,21 @@ port는 trial 동안 고정되므로 시작 시 한 번 snapshot하고, 움직�
 시각으로 조회합니다. 학습 row에는 하나의 `capture_stamp_ns`와 승인 source 중 가장 큰
 `max_sync_skew_ns`만 남기며 상세 원본 이벤트는 선택적 rosbag으로 보관합니다.
 
+### World randomization
+
+조명, ambient와 background 값은 각 옵션 범위를 ±3σ로 해석한 truncated Gaussian에서
+trial마다 추출합니다.
+
+| 옵션 | 기본값 | 설명 |
+| --- | ---: | --- |
+| `--randomize-lighting {true,false}` | `true` | trial별 world 조명·배경 randomization 사용 여부 |
+| `--light-intensity-scale-min`, `--light-intensity-scale-max` | `0.65`, `1.35` | 원본 light intensity에 곱할 scale 범위 |
+| `--light-color-jitter` | `0.12` | 흰색 기준 RGB 각 채널의 독립 대칭 jitter 범위 |
+| `--light-pose-xy-jitter-m` | `0.25` | light X/Y 위치의 독립 대칭 jitter 범위(m) |
+| `--light-pose-z-jitter-m` | `0.20` | light Z 위치의 대칭 jitter 범위(m) |
+| `--ambient-min`, `--ambient-max` | `0.0`, `0.08` | scene ambient grayscale 범위 |
+| `--background-min`, `--background-max` | `0.08`, `0.20` | scene background grayscale 범위 |
+
 ### Hugging Face
 
 | 옵션 | 기본값 | 설명 |
@@ -209,9 +252,46 @@ token은 Git에 포함하지 않습니다.
 `rosbags/portoffset/<dataset-version>/<run-id>/<trial>/`입니다. 다음을 모두 만족해야
 trial이 정상 종료됩니다.
 
+| 옵션 | 기본값 | 설명 |
+| --- | ---: | --- |
+| `--record-rosbag {true,false}` | `false` | trial별 MCAP 기록 여부 |
+| `--rosbag-output-dir` | `<repo>/rosbags/portoffset` | dataset version, run, trial 디렉터리를 만들 기준 경로 |
+| `--rosbag-topics` | 기본 10개 topic | 공백으로 구분해 기록할 topic 목록 지정 |
+| `--rosbag-start-timeout-s` | `20` | recorder 시작 확인 제한시간(초) |
+| `--rosbag-stop-grace-s` | `30` | MCAP finalize를 위한 SIGINT 대기시간(초) |
+
 - `metadata.yaml` 존재
 - message count가 0보다 큼
 - 모든 MCAP 파일의 시작·종료 magic이 유효함
+
+기본 기록 topic은 다음과 같습니다.
+
+```text
+/clock
+/joint_states
+/tf
+/tf_static
+/scoring/tf
+/aic_controller/controller_state
+/aic_controller/pose_commands
+/left_camera/image
+/center_camera/image
+/right_camera/image
+```
+
+### 실행·정리 고급 옵션
+
+| 옵션 | 기본값 | 설명 |
+| --- | ---: | --- |
+| `--policy-stop-grace-s` | `10` | stop file 전달 뒤 policy 정상 종료 대기시간(초) |
+| `--post-summary-wait-s` | `3` | collection summary 뒤 AIC scoring/reset 대기시간(초) |
+| `--sim-sigint-grace-s` | `5` | simulator SIGINT 정상 종료 대기시간(초) |
+| `--sim-cleanup-grace-s` | `2` | 남은 소유 process group의 SIGTERM 대기시간(초) |
+| `--sim-sigkill-grace-s` | `1` | 최종 SIGKILL 뒤 종료 확인시간(초) |
+| `--between-trial-wait-s` | `3` | 한 trial 정리 후 다음 trial 시작 전 대기시간(초) |
+| `--cleanup` | 꺼짐 | 이전 실행이 registry에 남긴 소유 process group을 정리한 뒤 수집 계속 |
+| `--cleanup-only` | 꺼짐 | 이전 실행의 소유 process group만 정리하고 종료 |
+| `--dry-run` | 꺼짐 | config와 randomized world만 생성·출력하고 simulator·policy·rosbag은 실행하지 않음 |
 
 ## 데이터셋
 
@@ -221,10 +301,18 @@ ws_aic/data/img2pos/<version>/
 ├── metadata.jsonl
 ├── samples.jsonl
 └── images/
-    ├── train/<left|center|right>/*.jpg
-    ├── val/<left|center|right>/*.jpg
-    └── test/<left|center|right>/*.jpg
+    ├── train/<left|center|right>/trial_<index>/*.jpg
+    ├── val/<left|center|right>/trial_<index>/*.jpg
+    └── test/<left|center|right>/trial_<index>/*.jpg
 ```
+
+JPEG 파일명은
+`<connector>_card_<rail 순서 card mask>_rail<target rail>[_port<port>]_num<sample>_<camera>.jpg`
+형식입니다. task ID의 bitmask는 오른쪽부터 rail 0이지만 파일명은 왼쪽부터 rail 0으로
+읽을 수 있도록 문자열을 뒤집습니다. 따라서 task ID의 `cards10100`은 파일명에서
+`card_00101`로 표시됩니다. 해당 trial에서 SFP rail 4의 port 0을 찍은 첫 center image는
+`images/train/center/trial_000/sfp_card_00101_rail4_port0_num001_center.jpg`로
+저장됩니다. SC도 같은 규칙을 사용하며 `cards10`은 `card_01`로 표시합니다.
 
 `metadata.jsonl`은 수집 실행마다 한 row를 추가합니다.
 

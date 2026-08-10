@@ -66,12 +66,11 @@ def _task_board_limits_section() -> dict:
     }
 
 
-def _robot_section(rng: random.Random, joint_noise_deg: float) -> dict:
+def _robot_section(rng: random.Random, joint_noise_rad: float) -> dict:
     """각 home joint에 독립 uniform 각도 잡음을 더한다."""
-    noise = math.radians(joint_noise_deg)
     return {
         "home_joint_positions": {
-            name: value + rng.uniform(-noise, noise)
+            name: value + rng.uniform(-joint_noise_rad, joint_noise_rad)
             for name, value in BASE_ROBOT_HOME.items()
         }
     }
@@ -192,17 +191,78 @@ def _gripper_offset(rng: random.Random, port_type: str) -> dict:
     }
 
 
+def _multiply_quaternions(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """xyzw quaternion 두 개를 곱한다."""
+    lx, ly, lz, lw = left
+    rx, ry, rz, rw = right
+    return (
+        lw * rx + lx * rw + ly * rz - lz * ry,
+        lw * ry - lx * rz + ly * rw + lz * rx,
+        lw * rz + lx * ry - ly * rx + lz * rw,
+        lw * rw - lx * rx - ly * ry - lz * rz,
+    )
+
+
+def _quaternion_from_rpy(
+    roll: float,
+    pitch: float,
+    yaw: float,
+) -> tuple[float, float, float, float]:
+    """roll, pitch, yaw를 xyzw quaternion으로 변환한다."""
+    sr, cr = math.sin(roll / 2.0), math.cos(roll / 2.0)
+    sp, cp = math.sin(pitch / 2.0), math.cos(pitch / 2.0)
+    sy, cy = math.sin(yaw / 2.0), math.cos(yaw / 2.0)
+    return (
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
+
+
+def _rpy_from_quaternion(
+    quaternion: tuple[float, float, float, float],
+) -> tuple[float, float, float]:
+    """xyzw quaternion을 roll, pitch, yaw로 변환한다."""
+    x, y, z, w = quaternion
+    roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+    pitch = math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x))))
+    yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    return roll, pitch, yaw
+
+
+def _sample_rotation_noise(
+    rng: random.Random,
+    max_angle_rad: float,
+) -> tuple[float, float, float, float]:
+    """SO(3) 구 내부에서 최대 회전각을 넘지 않는 quaternion을 추출한다."""
+    if max_angle_rad <= 0.0:
+        return 0.0, 0.0, 0.0, 1.0
+    axis = [rng.normalvariate(0.0, 1.0) for _ in range(3)]
+    norm = math.sqrt(sum(value * value for value in axis))
+    while norm <= 1e-12:
+        axis = [rng.normalvariate(0.0, 1.0) for _ in range(3)]
+        norm = math.sqrt(sum(value * value for value in axis))
+    angle = max_angle_rad * rng.random() ** (1.0 / 3.0)
+    scale = math.sin(angle / 2.0) / norm
+    return axis[0] * scale, axis[1] * scale, axis[2] * scale, math.cos(angle / 2.0)
+
+
 def _cable_rpy(
     rng: random.Random,
     args: argparse.Namespace,
 ) -> tuple[float, float, float]:
-    """기준 cable RPY에 지정 각도 범위의 uniform 잡음을 더한다."""
-    noise = math.radians(args.cable_rpy_noise_deg)
-    return (
-        LIMITS["cable_roll"] + rng.uniform(-noise, noise),
-        LIMITS["cable_pitch"] + rng.uniform(-noise, noise),
-        LIMITS["cable_yaw"] + rng.uniform(-noise, noise),
+    """기준 cable 자세에 전체 회전각이 상한 이내인 local 잡음을 합성한다."""
+    base = _quaternion_from_rpy(
+        LIMITS["cable_roll"],
+        LIMITS["cable_pitch"],
+        LIMITS["cable_yaw"],
     )
+    noise = _sample_rotation_noise(rng, args.cable_rotation_noise_rad)
+    return _rpy_from_quaternion(_multiply_quaternions(base, noise))
 
 
 def _cable_config(
@@ -441,7 +501,7 @@ def make_trial_config(
         task_id, trial, scenario_params = _make_sc_trial(
             index, combination_mask, rng, args
         )
-    robot = _robot_section(rng, args.robot_joint_noise_deg)
+    robot = _robot_section(rng, args.robot_joint_noise_rad)
     config = {
         "scoring": _scoring_section(),
         "task_board_limits": _task_board_limits_section(),
