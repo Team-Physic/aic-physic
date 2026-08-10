@@ -516,7 +516,7 @@ def start_gazebo(
         launch_args += ["gazebo_gui:=false", "launch_rviz:=false"]
 
     args_str = " ".join(shlex.quote(a) for a in launch_args)
-    cmd = ["distrobox", "enter", "-r", "aic_eval", "--", "bash", "-c",
+    cmd = ["distrobox", "enter", "-r", "aic_eval_physic", "--", "bash", "-c",
            f"/entrypoint.sh {args_str}"]
 
     if dry_run:

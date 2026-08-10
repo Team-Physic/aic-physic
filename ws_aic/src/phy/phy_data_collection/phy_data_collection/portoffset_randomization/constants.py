@@ -52,7 +52,7 @@ CLI_DEFAULTS = {
     "samples_per_trial": 24,
     "time_limit_s": 600,
     "trial_timeout_s": None,
-    "distrobox": "aic_eval",
+    "distrobox": "aic_eval_physic",
     "headless": False,
     "launch_rviz": True,
     "policy_start_wait_s": 5.0,
