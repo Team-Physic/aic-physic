@@ -7,6 +7,9 @@ version = "0.1.0"
 preview = ["pixi-build"]
 conda-pypi-map = { "robostack-kilted" = "aic/robostack_mapping.json", "conda-forge" = "conda_pypi_mapping.json" }
 
+[tasks]
+view_annotations = "PYTHONPATH=tools/bounding_box_tool python -m bounding_box_tool.main"
+
 [target.linux-64.dependencies]
 evdev = ">=1.9.2,<2"
 
@@ -46,6 +49,7 @@ pynput = ">=1.7.6,<2"
 pyspacemouse = ">=2.0.0, <3"
 
 [feature.phy.dependencies]
+pyqt = ">=5.15,<6"
 pyyaml = ">=6,<7"
 ros-kilted-phy-policy = { path = "phy/phy_policy" }
 ros-kilted-phy-data-collection = { path = "phy/phy_data_collection" }
