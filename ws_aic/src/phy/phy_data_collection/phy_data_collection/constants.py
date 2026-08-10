@@ -24,10 +24,10 @@ ENGINE_SETUP = "/ws_aic/install/setup.bash"
 RUN_MARKER_ENV = "AIC_PORTOFFSET_RUN_ID"
 REGISTRY_FILENAME = "owned_process_groups.json"
 TRIAL_TIMEOUT_GRACE_S = 180.0
+MIN_CLEARANCE_MM = 20.0
 
 BOOLEAN_METAVAR = "{true,false}"
 PORT_ORDER_CHOICES = ("round_robin", "random")
-UPLOAD_PORT_TYPE_CHOICES = ("", "sfp", "sc")
 ROSBAG_TOPICS = (
     "/clock",
     "/joint_states",
@@ -43,17 +43,21 @@ ROSBAG_TOPICS = (
 
 CLI_DEFAULTS = {
     # Trial and simulator.
-    "trials": 20,
+    "trials": 100,
+    "workers": 1,
     "seed": 30,
     "port_types": "sfp,sc",
     "port_order": "round_robin",
     "color_log": True,
-    "samples_per_trial": 24,
+    "samples_per_trial": 40,
     "time_limit_s": 600,
     "trial_timeout_s": None,
     "distrobox": "aic_eval_physic",
-    "headless": False,
-    "launch_rviz": True,
+    "headless": True,
+    "launch_rviz": False,
+    "ros_domain_id_base": 40,
+    "zenoh_port_base": 7600,
+    "worker_start_delay_s": 2.0,
     "policy_start_wait_s": 5.0,
     "robot_joint_noise_deg": 4.0,
     "cable_rpy_noise_deg": 20.0,
@@ -65,10 +69,12 @@ CLI_DEFAULTS = {
     "rosbag_stop_grace_s": 30.0,
     # Dataset and Hugging Face.
     "dataset_version": "",
+    "resume": False,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
     "push_to_hub": False,
-    "hf_repo_id": "aic-sejong-team/aic-vision-offset-dataset",
-    "hf_revision": "main",
-    "upload_on_port_type": "",
+    "hf_repo_id": "team-physic/aic-align",
+    "hf_revision": "",
     "hf_private": False,
     # Port-local pose sampling.
     "dx_min_mm": -50.0,
@@ -76,7 +82,9 @@ CLI_DEFAULTS = {
     "dy_min_mm": -50.0,
     "dy_max_mm": 50.0,
     "dz_min_mm": 0.0,
-    "dz_max_mm": 100.0,
+    "dz_max_mm": 50.0,
+    "sampling_tiers_mm": "50,10,5,2",
+    "sampling_tier_weights": "1,1,1,1",
     "port_roll_limit_deg": 25.0,
     "port_pitch_limit_deg": 25.0,
     "port_yaw_limit_deg": 35.0,
@@ -87,12 +95,18 @@ CLI_DEFAULTS = {
     "yaw_min_deg": None,
     "yaw_max_deg": None,
     "rpy_norm_max_rad": None,
-    "base_z_offset_mm": 0.0,
+    "base_z_offset_mm": MIN_CLEARANCE_MM,
     "min_visible_cameras": 2,
     "visibility_margin_px": 64.0,
     # Capture timestamp synchronization.
     "sync_tolerance_ms": 30.0,
     "sync_wait_timeout_s": 1.0,
+    "settle_timeout_s": 8.0,
+    "settle_position_tolerance_mm": 1.0,
+    "settle_orientation_tolerance_deg": 1.0,
+    "settle_stable_observations": 3,
+    "settle_poll_s": 0.02,
+    "capture_attempt_multiplier": 2.0,
     # World and lighting.
     "randomize_lighting": True,
     "light_intensity_scale_min": 0.65,

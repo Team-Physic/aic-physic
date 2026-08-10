@@ -66,6 +66,19 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_float_list(name: str, default: str) -> list[float]:
+    """쉼표로 구분한 환경변수를 유한한 float 목록으로 변환한다."""
+    values = []
+    for token in os.environ.get(name, default).split(","):
+        try:
+            value = float(token.strip())
+        except ValueError:
+            continue
+        if np.isfinite(value):
+            values.append(value)
+    return values
+
+
 def _range_from_env(
     min_name: str,
     max_name: str,
@@ -104,7 +117,10 @@ class PortOffsetCollect(Policy):
         self.step_sleep_s = 1.0 / (fps if fps > 0 else 20.0)
         self.capture_root = Path(os.environ.get("AIC_CAPTURE_DIR", "/tmp/aic_episodes"))
         self.collect_steps = max(1, int(os.environ["AIC_COLLECT_STEPS"]))
-        self.base_z_offset = _env_float("AIC_PORT_COLLECT_BASE_Z_OFFSET_M", 0.020)
+        self.base_z_offset = max(
+            motion.MIN_CLEARANCE_M,
+            _env_float("AIC_PORT_COLLECT_BASE_Z_OFFSET_M", motion.MIN_CLEARANCE_M),
+        )
         self.sync_tolerance_ns = int(
             max(0.0, _env_float("AIC_COLLECT_SYNC_TOLERANCE_MS", 30.0)) * 1e6
         )
@@ -112,12 +128,25 @@ class PortOffsetCollect(Policy):
             0.0, _env_float("AIC_COLLECT_SYNC_WAIT_TIMEOUT_SEC", 1.0)
         )
         self.sync_poll_s = max(0.001, _env_float("AIC_COLLECT_SYNC_POLL_SEC", 0.01))
+        self.settle_timeout_s = max(0.0, _env_float("AIC_COLLECT_SETTLE_TIMEOUT_SEC", 8.0))
+        self.settle_position_tolerance_m = max(
+            0.0, _env_float("AIC_COLLECT_SETTLE_POSITION_TOLERANCE_MM", 1.0) / 1000.0
+        )
+        self.settle_orientation_tolerance_rad = max(
+            0.0,
+            np.deg2rad(_env_float("AIC_COLLECT_SETTLE_ORIENTATION_TOLERANCE_DEG", 1.0)),
+        )
+        self.settle_stable_observations = max(
+            1, int(os.environ.get("AIC_COLLECT_SETTLE_STABLE_OBSERVATIONS", "3"))
+        )
+        self.settle_poll_s = max(0.001, _env_float("AIC_COLLECT_SETTLE_POLL_SEC", 0.02))
+        self.capture_attempt_multiplier = max(
+            1.0, _env_float("AIC_COLLECT_CAPTURE_ATTEMPT_MULTIPLIER", 2.0)
+        )
         self.color_log = _env_bool("AIC_COLLECT_COLOR_LOG", True) and not os.environ.get("NO_COLOR")
         seed = os.environ.get("AIC_COLLECT_RANDOM_SEED", "").strip()
         self.rng = np.random.default_rng(int(seed) if seed else None)
-        self.planner = motion.Planner(
-            i_gain=_env_float("AIC_CAPTURE_CHEATCODE_I_GAIN", 0.15)
-        )
+        self.planner = motion.Planner()
 
         self.dataset_dir = Path(
             os.environ.setdefault("AIC_IMG2POS_DATASET_DIR", str(_dataset_dir()))
@@ -126,25 +155,15 @@ class PortOffsetCollect(Policy):
         self.samples_path = self.dataset_dir / "samples.jsonl"
         self.run_id = os.environ.get("AIC_PORTOFFSET_RUN_ID", "").strip()
         self.trial_index = os.environ.get("AIC_PORTOFFSET_TRIAL_INDEX", "").strip()
-        self.val_ratio = _env_float("AIC_IMG2POS_VAL_RATIO", 0.3)
+        self.val_ratio = _env_float("AIC_IMG2POS_VAL_RATIO", 0.15)
+        self.test_ratio = _env_float("AIC_IMG2POS_TEST_RATIO", 0.15)
+        self.trial_split = os.environ.get("AIC_IMG2POS_TRIAL_SPLIT", "").strip().lower()
         self.visibility_margin_px = _env_float("AIC_IMG2POS_VISIBILITY_MARGIN_PX", 64.0)
         self.min_visible_cameras = max(1, int(os.environ.get("AIC_IMG2POS_MIN_VISIBLE_CAMERAS", "2")))
         self.capture_count = 0
         self.record = _env_bool("AIC_IMG2POS_RECORD", True)
-        self.push_to_hub = _env_bool("AIC_IMG2POS_PUSH_TO_HUB", True)
-        self.hf_repo_id = os.environ.get("AIC_IMG2POS_HF_REPO_ID", "").strip()
-        self.hf_revision = (
-            os.environ.get("AIC_IMG2POS_HF_REVISION", "").strip()
-            or self.dataset_version
-            or "main"
-        )
-        self.hf_private = _env_bool("AIC_IMG2POS_HF_PRIVATE", False)
-        self.upload_on_port_type = os.environ.get(
-            "AIC_IMG2POS_UPLOAD_ON_PORT_TYPE", "sc"
-        ).strip().lower()
-
         xy_limit = _env_float("AIC_PORT_COLLECT_XY_LIMIT_MM", 50.0) / 1000.0
-        z_limit = _env_float("AIC_PORT_COLLECT_Z_LIMIT_MM", 100.0) / 1000.0
+        z_limit = _env_float("AIC_PORT_COLLECT_Z_LIMIT_MM", 50.0) / 1000.0
         degree = np.pi / 180.0
         roll_limit = _env_float("AIC_PORT_COLLECT_ROLL_LIMIT_DEG", 25.0) * degree
         pitch_limit = _env_float("AIC_PORT_COLLECT_PITCH_LIMIT_DEG", 25.0) * degree
@@ -158,6 +177,20 @@ class PortOffsetCollect(Policy):
             "yaw": _range_from_env("AIC_PORT_COLLECT_YAW_MIN_DEG", "AIC_PORT_COLLECT_YAW_MAX_DEG", -yaw_limit, yaw_limit, degree),
         }
         self.rpy_norm_max = max(0.0, _env_float("AIC_PORT_COLLECT_RPY_NORM_MAX_RAD", 0.0))
+        tiers = [
+            value
+            for value in _env_float_list("AIC_PORT_COLLECT_SAMPLING_TIERS_MM", "50,10,5,2")
+            if value > 0.0
+        ]
+        self.sampling_tiers_m = [value / 1000.0 for value in tiers] or [xy_limit]
+        weights = [
+            value
+            for value in _env_float_list("AIC_PORT_COLLECT_SAMPLING_TIER_WEIGHTS", "1,1,1,1")
+            if value > 0.0
+        ]
+        self.sampling_tier_weights = (
+            weights if len(weights) == len(self.sampling_tiers_m) else [1.0] * len(self.sampling_tiers_m)
+        )
         self.samples = motion.build_samples(self)
 
         self._tool0_tcp = np.eye(4)
@@ -176,7 +209,7 @@ class PortOffsetCollect(Policy):
         threading.Thread(target=self._watch_stop_file, daemon=True).start()
         self.get_logger().info(
             f"[PortOffsetCollect] Ready: steps={self.collect_steps}, "
-            f"dataset={self.dataset_dir}, push_to_hub={self.push_to_hub}"
+            f"dataset={self.dataset_dir}, split={self.trial_split or 'hash'}"
         )
 
     def _watch_stop_file(self) -> None:
@@ -266,7 +299,7 @@ class PortOffsetCollect(Policy):
         return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
     def _finish(self, episode_dir: Path, task: Task, counts: dict[str, int], status: str, detail: str = "") -> bool:
-        """episode summary와 선택적 HF upload를 기록하고 engine에 완료를 반환한다."""
+        """episode 수집 summary를 기록하고 engine에 완료를 반환한다."""
         summary = {
             "task_id": task.id,
             "success": False,
@@ -278,12 +311,9 @@ class PortOffsetCollect(Policy):
             "lift_up_steps": counts["lift_up"],
             "approach_steps": counts["approach"],
             "collect_steps": counts["collect"],
+            "collect_attempts": counts["attempts"],
         }
         summary_path = episode_dir / "episode_summary.json"
-        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        summary["hub_upload"] = dataset.upload_to_hub(
-            self, task, status, counts["collect"]
-        )
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         self.get_logger().info(
             f"DataCollect complete. status={status} collect_steps={counts['collect']}"
@@ -298,12 +328,11 @@ class PortOffsetCollect(Policy):
         send_feedback: SendFeedbackCallback,
     ) -> bool:
         """lift-up, approach, collect를 실행하고 수집 결과를 확정한다."""
-        self.planner.reset()
         send_feedback("data collect running")
         episode_name = time.strftime("%Y%m%d_%H%M%S") + f"_{task.id}"
         episode_dir = self.capture_root / episode_name
         episode_dir.mkdir(parents=True, exist_ok=True)
-        counts = {"lift_up": 0, "approach": 0, "collect": 0}
+        counts = {"lift_up": 0, "approach": 0, "collect": 0, "attempts": 0}
         if not self.record:
             return self._finish(episode_dir, task, counts, "recording_disabled")
 
@@ -331,7 +360,7 @@ class PortOffsetCollect(Policy):
             "port_snapshot": port_snapshot,
             "cable_tip_frame": cable_tip_frame,
             "plug_offset": dataset.plug_reference_offset(task, cable_tip_frame),
-            **motion.control_for(task, self.planner),
+            **motion.control_for(task),
         }
         for name, stage in (
             ("lift_up", motion.lift),

@@ -6,8 +6,11 @@ import hashlib
 import json
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+import fcntl
 
 import cv2
 import numpy as np
@@ -265,18 +268,23 @@ def _trial_id(policy, episode_name: str) -> str:
     """run metadata로 trial ID를 만들고 없으면 episode 이름을 반환한다."""
     run_id = policy.run_id
     trial_index = policy.trial_index
-    return f"{run_id}:{trial_index}" if run_id and trial_index else episode_name
+    return (
+        f"{run_id}:{trial_index}"
+        if run_id and trial_index not in (None, "")
+        else episode_name
+    )
 
 
 def split_for_trial(policy, trial_id: str) -> str:
-    """같은 trial을 안정적으로 동일한 train/val split에 배정한다."""
-    ratio = min(max(float(policy.val_ratio), 0.0), 1.0)
-    if ratio <= 0.0:
-        return "train"
-    if ratio >= 1.0:
-        return "val"
+    """같은 trial을 안정적으로 동일한 train/val/test split에 배정한다."""
+    if policy.trial_split in {"train", "val", "test"}:
+        return policy.trial_split
+    val_ratio = min(max(float(policy.val_ratio), 0.0), 1.0)
+    test_ratio = min(max(float(policy.test_ratio), 0.0), 1.0 - val_ratio)
     fraction = int.from_bytes(hashlib.sha256(trial_id.encode()).digest()[:8], "big") / float(1 << 64)
-    return "val" if fraction < ratio else "train"
+    if fraction < test_ratio:
+        return "test"
+    return "val" if fraction < test_ratio + val_ratio else "train"
 
 
 def _connector(task) -> str:
@@ -298,11 +306,23 @@ def _max_skew(timestamps: dict[str, Any]) -> int:
         return 0
 
 
+@contextmanager
+def _dataset_write_lock(policy):
+    """병렬 policy가 manifest와 JSONL을 동시에 수정하지 못하게 막는다."""
+    policy.dataset_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = policy.dataset_dir / ".write.lock"
+    with lock_path.open("a", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def write_manifest(policy) -> None:
     """compact img2pos 데이터셋 schema를 data.yaml에 기록한다."""
     policy.dataset_dir.mkdir(parents=True, exist_ok=True)
-    (policy.dataset_dir / "data.yaml").write_text(
-        "\n".join(
+    content = "\n".join(
             [
                 "schema_version: 1",
                 "task: img2pos",
@@ -319,11 +339,19 @@ def write_manifest(policy) -> None:
                 "split:",
                 "  group_by: trial_id",
                 f"  validation_ratio: {policy.val_ratio:.6f}",
+                f"  test_ratio: {policy.test_ratio:.6f}",
+                "sampling:",
+                f"  minimum_clearance_mm: {policy.base_z_offset * 1000.0:g}",
+                "  position_tiers_mm: ["
+                + ", ".join(f"{value * 1000.0:g}" for value in policy.sampling_tiers_m)
+                + "]",
                 "",
             ]
-        ),
-        encoding="utf-8",
-    )
+        )
+    with _dataset_write_lock(policy):
+        temporary = policy.dataset_dir / f".data.yaml.{os.getpid()}.tmp"
+        temporary.write_text(content, encoding="utf-8")
+        temporary.replace(policy.dataset_dir / "data.yaml")
 
 
 def save_sample(
@@ -336,6 +364,8 @@ def save_sample(
     port_tf: Transform,
     timestamps: dict[str, Any],
     label_xyz: list[float],
+    sample: dict[str, float],
+    settle: dict[str, float],
 ) -> tuple[bool, str]:
     """가시 camera JPEG와 최소 img2pos JSONL row를 저장한다."""
     if observation is None:
@@ -384,8 +414,15 @@ def save_sample(
                 "camera": camera,
                 "connector": _connector(task),
                 "target_xyz_m": label_xyz,
+                "sampling_offset_xyz_m": sample["actual_xyz_m"],
+                "sampling_tier_mm": float(sample["tier_m"] * 1000.0),
                 "capture_stamp_ns": capture_stamp,
                 "max_sync_skew_ns": _max_skew(timestamps),
+                "settle_position_error_mm": float(settle["position_error_m"] * 1000.0),
+                "settle_orientation_error_deg": float(
+                    np.rad2deg(settle["orientation_error_rad"])
+                ),
+                "settle_wait_ms": float(settle["wait_ns"] / 1e6),
             }
         )
     if len(records) < policy.min_visible_cameras:
@@ -393,9 +430,10 @@ def save_sample(
             path.unlink(missing_ok=True)
         return False, f"camera 저장 부족: required={policy.min_visible_cameras}, details={failures}"
     try:
-        with policy.samples_path.open("a", encoding="utf-8") as stream:
-            for record in records:
-                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+        with _dataset_write_lock(policy):
+            with policy.samples_path.open("a", encoding="utf-8") as stream:
+                for record in records:
+                    stream.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError as exc:
         for path in written:
             path.unlink(missing_ok=True)
@@ -403,51 +441,3 @@ def save_sample(
     policy.capture_count += 1
     cameras = sorted(record["camera"] for record in records)
     return True, f"capture_id={capture_id}, cameras={cameras}, saved_count={policy.capture_count}"
-
-
-def upload_to_hub(policy, task, status: str, collect_steps: int) -> dict[str, Any]:
-    """수집 완료 dataset을 설정된 Hugging Face branch에 업로드한다."""
-    if not policy.push_to_hub:
-        return {"enabled": False, "success": False, "reason": "disabled"}
-    if status != "ok" or collect_steps <= 0:
-        return {"enabled": True, "success": False, "reason": f"skipped_{status}"}
-    port_type = str(task.port_type).strip().lower()
-    if policy.upload_on_port_type and port_type != policy.upload_on_port_type:
-        return {"enabled": True, "success": False, "reason": f"waiting_for_{policy.upload_on_port_type}"}
-    if not policy.hf_repo_id:
-        reason = "AIC_IMG2POS_HF_REPO_ID is not set"
-        policy.get_logger().warn(f"[PortOffsetCollect] HF upload skipped: {reason}")
-        return {"enabled": True, "success": False, "reason": reason}
-    try:
-        from huggingface_hub import HfApi
-
-        api = HfApi()
-        api.whoami()
-        api.create_repo(
-            repo_id=policy.hf_repo_id,
-            repo_type="dataset",
-            private=policy.hf_private,
-            exist_ok=True,
-        )
-        if policy.hf_revision != "main":
-            branches = [ref.name for ref in api.list_repo_refs(policy.hf_repo_id, repo_type="dataset").branches]
-            if policy.hf_revision not in branches:
-                api.create_branch(
-                    repo_id=policy.hf_repo_id,
-                    repo_type="dataset",
-                    branch=policy.hf_revision,
-                )
-        api.upload_large_folder(
-            repo_id=policy.hf_repo_id,
-            repo_type="dataset",
-            revision=policy.hf_revision,
-            folder_path=str(policy.dataset_dir),
-            ignore_patterns=["*.tmp", "*.lock", "__pycache__/*", ".DS_Store"],
-            private=policy.hf_private,
-        )
-        url = f"https://huggingface.co/datasets/{policy.hf_repo_id}/tree/{policy.hf_revision}"
-        policy.get_logger().info(f"[PortOffsetCollect] HF upload complete: {url}")
-        return {"enabled": True, "success": True, "url": url}
-    except Exception as exc:
-        policy.get_logger().error(f"[PortOffsetCollect] HF upload failed: {exc}")
-        return {"enabled": True, "success": False, "reason": str(exc)}

@@ -47,6 +47,7 @@ LIFT_STEPS = _env_int("AIC_DISTANCE_INITIAL_LIFT_STEPS", 40)
 LIFT_DT = _env_float("AIC_DISTANCE_INITIAL_LIFT_DT", 0.05)
 LIFT_SETTLE_S = _env_float("AIC_DISTANCE_INITIAL_LIFT_SETTLE_S", 0.50)
 APPROACH_Z_M = _env_float("AIC_APPROACH_NEAR_Z_OFFSET_M", 0.020)
+MIN_CLEARANCE_M = 0.020
 APPROACH_STEPS = _env_int("AIC_APPROACH_STEPS", 80)
 APPROACH_DT = _env_float("AIC_APPROACH_DT", 0.05)
 APPROACH_SETTLE_S = _env_float("AIC_APPROACH_SETTLE_S", 0.50)
@@ -55,16 +56,6 @@ APPROACH_SETTLE_S = _env_float("AIC_APPROACH_SETTLE_S", 0.50)
 class Planner:
     """plug 기준점을 port 접근축 위 목표점으로 이동시키는 GT planner."""
 
-    def __init__(self, i_gain: float = 0.15, windup: float = 0.15):
-        """누적 XY 보정 gain과 제한값을 설정한다."""
-        self.i_gain = i_gain
-        self.windup = windup
-        self.reset()
-
-    def reset(self) -> None:
-        """누적 XY 보정값을 초기화한다."""
-        self.integrator = np.zeros(2, dtype=float)
-
     def build_pose(
         self,
         port_tf: Transform,
@@ -72,7 +63,6 @@ class Planner:
         gripper_tf: Transform,
         *,
         z_offset: float,
-        reset_integrator: bool,
     ) -> tuple[Pose, dict[str, Any]]:
         """현재 TF에서 plug가 목표 port pose에 도달할 TCP pose를 계산한다."""
         port_q = (
@@ -116,22 +106,9 @@ class Planner:
         port_axis = quaternion_matrix(*port_q) @ np.array([0.0, 0.0, -1.0])
         norm = float(np.linalg.norm(port_axis))
         port_axis = port_axis / norm if norm > 1e-9 else np.array([0.0, 0.0, -1.0])
-        if reset_integrator:
-            self.reset()
-        else:
-            self.integrator = np.clip(
-                self.integrator + port_xyz[:2] - plug_xyz[:2],
-                -self.windup,
-                self.windup,
-            )
-        correction = np.array(
-            [self.i_gain * self.integrator[0], self.i_gain * self.integrator[1], 0.0]
-        )
-        correction -= port_axis * float(np.dot(correction, port_axis))
         target_xyz = (
             port_xyz
             + port_axis * z_offset
-            + correction
             + gripper_xyz
             - plug_xyz
         )
@@ -148,43 +125,61 @@ class Planner:
 
 
 def build_samples(policy) -> list[dict[str, float]]:
-    """첫 영점과 stratified XYZ/RPY pose sample을 생성한다."""
-    zero = {name: 0.0 for name in ("x", "y", "z", "roll", "pitch", "yaw")}
-    if policy.collect_steps <= 1:
-        return [zero]
-    count = policy.collect_steps - 1
+    """coarse/near tier별 quota를 지키는 stratified XYZ/RPY sample을 생성한다."""
+    tiers = np.asarray(policy.sampling_tiers_m, dtype=float)
+    weights = np.asarray(policy.sampling_tier_weights, dtype=float)
+    raw_counts = weights / weights.sum() * policy.collect_steps
+    counts = np.floor(raw_counts).astype(int)
+    for index in np.argsort(-(raw_counts - counts))[: policy.collect_steps - int(counts.sum())]:
+        counts[index] += 1
 
-    def axis(low: float, high: float) -> np.ndarray:
-        """한 축을 같은 구간으로 나눠 각 구간에서 sample을 뽑는다."""
+    allocated = np.flatnonzero(counts > 0)
+    largest_index = int(allocated[np.argmax(tiers[allocated])])
+    zero = {
+        **{name: 0.0 for name in ("x", "y", "z", "roll", "pitch", "yaw")},
+        "tier_m": float(tiers[largest_index]),
+    }
+    counts[largest_index] -= 1
+    samples: list[dict[str, float]] = [zero]
+    largest_tier = float(np.max(tiers))
+
+    def axis(low: float, high: float, count: int) -> np.ndarray:
+        """한 tier의 축 범위를 같은 구간으로 나눠 sample을 뽑는다."""
         edges = np.linspace(low, high, count + 1)
         values = policy.rng.uniform(edges[:-1], edges[1:])
         policy.rng.shuffle(values)
         return values
 
-    values = {
-        name: axis(*policy.sample_ranges[name])
-        for name in ("x", "y", "z", "roll", "pitch", "yaw")
-    }
-    samples = [zero]
-    for index in range(count):
-        rpy = np.array([values[name][index] for name in ("roll", "pitch", "yaw")])
-        norm = float(np.linalg.norm(rpy))
-        if policy.rpy_norm_max > 0.0 and norm > policy.rpy_norm_max:
-            rpy *= policy.rpy_norm_max / norm
-        samples.append(
-            {
-                "x": float(values["x"][index]),
-                "y": float(values["y"][index]),
-                "z": float(values["z"][index]),
-                "roll": float(rpy[0]),
-                "pitch": float(rpy[1]),
-                "yaw": float(rpy[2]),
-            }
-        )
-    samples[1:] = sorted(
-        samples[1:],
-        key=lambda sample: np.linalg.norm([sample["x"], sample["y"], sample["z"]]),
-    )
+    for tier_index in np.argsort(-tiers):
+        tier = tiers[tier_index]
+        count = counts[tier_index]
+        if count <= 0:
+            continue
+        scale = float(tier) / largest_tier
+        values = {
+            name: axis(
+                policy.sample_ranges[name][0] * scale,
+                policy.sample_ranges[name][1] * scale,
+                int(count),
+            )
+            for name in ("x", "y", "z", "roll", "pitch", "yaw")
+        }
+        for index in range(int(count)):
+            rpy = np.array([values[name][index] for name in ("roll", "pitch", "yaw")])
+            norm = float(np.linalg.norm(rpy))
+            if policy.rpy_norm_max > 0.0 and norm > policy.rpy_norm_max:
+                rpy *= policy.rpy_norm_max / norm
+            samples.append(
+                {
+                    "x": float(values["x"][index]),
+                    "y": float(values["y"][index]),
+                    "z": float(values["z"][index]),
+                    "roll": float(rpy[0]),
+                    "pitch": float(rpy[1]),
+                    "yaw": float(rpy[2]),
+                    "tier_m": float(tier),
+                }
+            )
     return samples
 
 
@@ -236,8 +231,25 @@ def _apply_sample(policy, pose: Pose, port_tf: Transform, port_axis, index: int)
         "roll_deg": float(np.rad2deg(sample["roll"])),
         "pitch_deg": float(np.rad2deg(sample["pitch"])),
         "yaw_deg": float(np.rad2deg(sample["yaw"])),
+        "tier_m": sample["tier_m"],
     }
     return pose, detail
+
+
+def _actual_sampling_offset(
+    label_xyz: list[float],
+    port_tf: Transform,
+    port_axis,
+    minimum_clearance_m: float,
+) -> list[float]:
+    """실제 TF label을 안전거리 기준 port-local sampling offset으로 변환한다."""
+    x_axis, y_axis, z_axis = _port_axes(port_tf, port_axis)
+    label = np.asarray(label_xyz, dtype=float)
+    return [
+        -float(np.dot(label, x_axis)),
+        -float(np.dot(label, y_axis)),
+        -float(np.dot(label, z_axis)) - minimum_clearance_m,
+    ]
 
 
 def _copy_pose(pose: Pose) -> Pose:
@@ -256,6 +268,100 @@ def _copy_pose(pose: Pose) -> Pose:
 def _tcp_pose(observation) -> Pose | None:
     """Observation의 현재 TCP pose를 값 복사해 반환한다."""
     return None if observation is None else _copy_pose(observation.controller_state.tcp_pose)
+
+
+def _pose_error(current: Pose, target: Pose) -> tuple[float, float]:
+    """현재 TCP와 목표 pose의 위치·quaternion 각도 오차를 반환한다."""
+    current_xyz = np.array([current.position.x, current.position.y, current.position.z])
+    target_xyz = np.array([target.position.x, target.position.y, target.position.z])
+    current_q = np.array(
+        [current.orientation.x, current.orientation.y, current.orientation.z, current.orientation.w]
+    )
+    target_q = np.array(
+        [target.orientation.x, target.orientation.y, target.orientation.z, target.orientation.w]
+    )
+    current_norm = float(np.linalg.norm(current_q))
+    target_norm = float(np.linalg.norm(target_q))
+    if current_norm <= 1e-9 or target_norm <= 1e-9:
+        return float(np.linalg.norm(current_xyz - target_xyz)), float("inf")
+    cosine = float(np.clip(abs(np.dot(current_q / current_norm, target_q / target_norm)), 0.0, 1.0))
+    return float(np.linalg.norm(current_xyz - target_xyz)), 2.0 * float(np.arccos(cosine))
+
+
+def _controller_tracking_error(controller) -> tuple[float, float]:
+    """controller가 계산한 current-to-reference TCP 오차를 반환한다."""
+    error = np.asarray(getattr(controller, "tcp_error", ()), dtype=float)
+    if error.shape != (6,) or not np.all(np.isfinite(error)):
+        return float("inf"), float("inf")
+    return float(np.linalg.norm(error[:3])), float(np.linalg.norm(error[3:]))
+
+
+def wait_for_pose_convergence(policy, get_observation, target: Pose, command_stamp_ns: int):
+    """controller reference와 실제 TCP 움직임이 함께 멈출 때까지 기다린다."""
+    start_ns = time.monotonic_ns()
+    deadline_ns = start_ns + int(policy.settle_timeout_s * 1e9)
+    stable = 0
+    last_stamp = 0
+    last_reference = None
+    last_current = None
+    position_delta = float("inf")
+    orientation_delta = float("inf")
+    tracking_position_error = float("inf")
+    tracking_orientation_error = float("inf")
+    command_position_delta = float("inf")
+    command_orientation_delta = float("inf")
+    while time.monotonic_ns() <= deadline_ns:
+        observation = get_observation()
+        controller = getattr(observation, "controller_state", None)
+        header = getattr(controller, "header", None)
+        stamp = dataset._stamp_ns(getattr(header, "stamp", None))
+        if stamp and stamp > command_stamp_ns and stamp != last_stamp:
+            last_stamp = stamp
+            current = _copy_pose(controller.tcp_pose)
+            reference = _copy_pose(controller.reference_tcp_pose)
+            tracking_position_error, tracking_orientation_error = (
+                _controller_tracking_error(controller)
+            )
+            command_position_delta, command_orientation_delta = _pose_error(reference, target)
+            if last_reference is not None and last_current is not None:
+                reference_position_delta, reference_orientation_delta = _pose_error(
+                    reference, last_reference
+                )
+                position_delta, orientation_delta = _pose_error(current, last_current)
+                reference_stable = (
+                    reference_position_delta <= 1e-5
+                    and reference_orientation_delta <= 1e-4
+                )
+                within_tolerance = (
+                    position_delta <= policy.settle_position_tolerance_m
+                    and orientation_delta <= policy.settle_orientation_tolerance_rad
+                    and reference_stable
+                )
+                stable = stable + 1 if within_tolerance else 0
+                if stable >= policy.settle_stable_observations:
+                    return stamp, {
+                        "position_error_m": position_delta,
+                        "orientation_error_rad": orientation_delta,
+                        "tracking_position_error_m": tracking_position_error,
+                        "tracking_orientation_error_rad": tracking_orientation_error,
+                        "command_position_delta_m": command_position_delta,
+                        "command_orientation_delta_rad": command_orientation_delta,
+                        "wait_ns": time.monotonic_ns() - start_ns,
+                        "stable_observations": stable,
+                    }
+            last_reference = reference
+            last_current = current
+        policy.sleep_for(policy.settle_poll_s)
+    return None, {
+        "position_error_m": position_delta,
+        "orientation_error_rad": orientation_delta,
+        "tracking_position_error_m": tracking_position_error,
+        "tracking_orientation_error_rad": tracking_orientation_error,
+        "command_position_delta_m": command_position_delta,
+        "command_orientation_delta_rad": command_orientation_delta,
+        "wait_ns": time.monotonic_ns() - start_ns,
+        "stable_observations": stable,
+    }
 
 
 def _follow(policy, move_robot, start: Pose, target: Pose, steps: int, dt: float, label: str, stiffness, damping):
@@ -277,15 +383,12 @@ def _follow(policy, move_robot, start: Pose, target: Pose, steps: int, dt: float
         policy.sleep_for(dt)
 
 
-def control_for(task, planner: Planner) -> dict[str, list[float]]:
+def control_for(task) -> dict[str, list[float]]:
     """connector 타입에 맞는 접근·수집 impedance 설정을 반환한다."""
     if "sfp" not in task.port_type.lower():
-        planner.i_gain, planner.windup = 0.07, 0.06
         collect_stiffness = [280.0, 250.0, 250.0, 50.0, 50.0, 50.0]
         collect_damping = [87.0, 80.0, 80.0, 20.0, 20.0, 20.0]
     else:
-        planner.i_gain = float(os.environ.get("AIC_CAPTURE_CHEATCODE_I_GAIN", "0.15"))
-        planner.windup = 0.08
         collect_stiffness, collect_damping = STIFFNESS, DAMPING
     return {
         "lift_stiffness": LIFT_STIFFNESS,
@@ -332,7 +435,6 @@ def approach(policy, context, get_observation, move_robot) -> bool:
             plug_tf,
             policy.lookup_transform("base_link", "gripper/tcp"),
             z_offset=APPROACH_Z_M,
-            reset_integrator=True,
         )
     except TransformException as exc:
         policy.get_logger().error(f"[PortOffsetCollect] approach TF failed: {exc}")
@@ -375,8 +477,20 @@ def failure_reason(reason: str) -> str:
 
 
 def collect(policy, context, get_observation, move_robot) -> bool:
-    """stratified pose마다 동기화 image와 촬영 시점 XYZ label을 저장한다."""
-    for index in range(policy.collect_steps):
+    """목표 pose 수렴 후 tier별 image와 촬영 시점 XYZ label을 저장한다."""
+    max_attempts_per_sample = int(np.ceil(policy.capture_attempt_multiplier))
+    sample_attempts = 0
+    while context["counts"]["collect"] < policy.collect_steps:
+        if sample_attempts >= max_attempts_per_sample:
+            policy.get_logger().error(
+                "[PortOffsetCollect] sample attempts exhausted: "
+                f"sample={context['counts']['collect'] + 1}/{policy.collect_steps}, "
+                f"attempts={max_attempts_per_sample}"
+            )
+            return False
+        index = context["counts"]["collect"]
+        sample_attempts += 1
+        context["counts"]["attempts"] += 1
         try:
             port_tf = context["port_snapshot"].transform
             plug_tf = dataset.shift_origin(
@@ -388,19 +502,44 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 plug_tf,
                 policy.lookup_transform("base_link", "gripper/tcp"),
                 z_offset=policy.base_z_offset,
-                reset_integrator=False,
             )
             pose, sample = _apply_sample(policy, pose, port_tf, state["port_axis"], index)
             policy.get_logger().info(
-                f"COLLECT {index}/{policy.collect_steps}: "
+                f"COLLECT {index + 1}/{policy.collect_steps} "
+                f"attempt={sample_attempts}/{max_attempts_per_sample} "
+                f"tier={sample['tier_m']*1e3:g}mm: "
                 f"xyz=({sample['x_m']*1e3:+.1f}, {sample['y_m']*1e3:+.1f}, {sample['z_m']*1e3:+.1f})mm "
                 f"rpy=({sample['roll_deg']:+.1f}, {sample['pitch_deg']:+.1f}, {sample['yaw_deg']:+.1f})deg"
             )
             command_stamp = policy.set_pose_target(
                 move_robot, pose, context["collect_stiffness"], context["collect_damping"]
             )
+            settled_stamp, settle = wait_for_pose_convergence(
+                policy, get_observation, pose, command_stamp
+            )
+            if settled_stamp is None:
+                policy.get_logger().error(
+                    policy.log_text(
+                        "[PortOffsetCollect] CAPTURE FAILED: pose convergence timeout; "
+                        f"motion={settle['position_error_m']*1e3:.3f}mm/"
+                        f"{np.rad2deg(settle['orientation_error_rad']):.3f}deg, "
+                        f"tracking={settle['tracking_position_error_m']*1e3:.3f}mm/"
+                        f"{np.rad2deg(settle['tracking_orientation_error_rad']):.3f}deg",
+                        "red",
+                    )
+                )
+                continue
+            policy.get_logger().info(
+                "[PortOffsetCollect] pose settled: "
+                f"motion={settle['position_error_m']*1e3:.3f}mm/"
+                f"{np.rad2deg(settle['orientation_error_rad']):.3f}deg, "
+                f"tracking={settle['tracking_position_error_m']*1e3:.3f}mm/"
+                f"{np.rad2deg(settle['tracking_orientation_error_rad']):.3f}deg, "
+                f"command_clamp_delta={settle['command_position_delta_m']*1e3:.3f}mm/"
+                f"{np.rad2deg(settle['command_orientation_delta_rad']):.3f}deg"
+            )
             observation, timestamps = dataset.wait_for_observation(
-                policy, get_observation, command_stamp
+                policy, get_observation, settled_stamp
             )
             if observation is None:
                 policy.get_logger().error(
@@ -435,6 +574,26 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 policy.sleep_for(policy.step_sleep_s)
                 continue
             plug_at_capture = dataset.shift_origin(plug_stamped.transform, context["plug_offset"])
+            label_xyz = dataset.target_xyz(port_tf, plug_at_capture)
+            sampling_offset_xyz = _actual_sampling_offset(
+                label_xyz,
+                port_tf,
+                state["port_axis"],
+                policy.base_z_offset,
+            )
+            if max(abs(value) for value in sampling_offset_xyz) > sample["tier_m"]:
+                policy.get_logger().error(
+                    policy.log_text(
+                        "[PortOffsetCollect] CAPTURE FAILED: actual TF sampling offset is outside "
+                        f"the {sample['tier_m']*1e3:g}mm tier; "
+                        f"xyz=({sampling_offset_xyz[0]*1e3:+.3f}, "
+                        f"{sampling_offset_xyz[1]*1e3:+.3f}, "
+                        f"{sampling_offset_xyz[2]*1e3:+.3f})mm",
+                        "red",
+                    )
+                )
+                continue
+            sample["actual_xyz_m"] = sampling_offset_xyz
             saved, detail = dataset.save_sample(
                 policy,
                 episode_name=context["episode_name"],
@@ -443,10 +602,13 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 observation=observation,
                 port_tf=port_tf,
                 timestamps=timestamps,
-                label_xyz=dataset.target_xyz(port_tf, plug_at_capture),
+                label_xyz=label_xyz,
+                sample=sample,
+                settle=settle,
             )
             if saved:
                 context["counts"]["collect"] += 1
+                sample_attempts = 0
                 policy.get_logger().info(
                     policy.log_text(
                         f"[PortOffsetCollect] CAPTURE SAVED: {detail}; "

@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 
@@ -92,6 +93,27 @@ def _start_logged_process(
     return proc
 
 
+def _peer_zenoh_override(port: int) -> str:
+    """한 worker 전용 Zenoh router만 사용하도록 peer 설정을 반환한다."""
+    return ";".join(
+        [
+            f'connect/endpoints=["tcp/localhost:{port}"]',
+            "transport/shared_memory/enabled=false",
+        ]
+    )
+
+
+def _apply_worker_isolation(env: dict[str, str], args: argparse.Namespace) -> None:
+    """ROS, Gazebo와 Zenoh transport를 현재 worker 범위로 제한한다."""
+    domain_id = int(getattr(args, "worker_ros_domain_id", args.ros_domain_id_base))
+    zenoh_port = int(getattr(args, "worker_zenoh_port", args.zenoh_port_base))
+    partition = str(getattr(args, "worker_gz_partition", f"phy_{domain_id}"))
+    env["ROS_DOMAIN_ID"] = str(domain_id)
+    env["GZ_PARTITION"] = partition
+    env["IGN_PARTITION"] = partition
+    env["ZENOH_CONFIG_OVERRIDE"] = _peer_zenoh_override(zenoh_port)
+
+
 def _rosbag_log(
     args: argparse.Namespace,
     text: str,
@@ -144,6 +166,7 @@ def start_rosbag(
     env["RCUTILS_LOGGING_BUFFERED_STREAM"] = "1"
     env["PIXI_COLOR"] = "never"
     env["PIXI_NO_PROGRESS"] = "true"
+    _apply_worker_isolation(env, args)
     cmd = [
         "ros2",
         "bag",
@@ -296,6 +319,7 @@ def _policy_environment(
     stop_file: Path,
     run_id: str,
     trial_index: int | None = None,
+    trial_split: str = "",
 ) -> dict[str, str]:
     """PortOffsetCollect가 사용할 ROS 2 및 데이터 수집 환경변수를 구성한다."""
     env = os.environ.copy()
@@ -308,16 +332,14 @@ def _policy_environment(
     env[RUN_MARKER_ENV] = run_id
     if trial_index is not None:
         env["AIC_PORTOFFSET_TRIAL_INDEX"] = str(trial_index)
+        env["AIC_COLLECT_RANDOM_SEED"] = str(args.seed + trial_index * 1_000_003)
+    if trial_split:
+        env["AIC_IMG2POS_TRIAL_SPLIT"] = trial_split
     env["AIC_COLLECT_STEPS"] = str(args.samples_per_trial)
     env["AIC_IMG2POS_DATASET_VERSION"] = args.dataset_version.strip()
     env["AIC_IMG2POS_DATASET_DIR"] = str(dataset_dir(args))
-    env["AIC_IMG2POS_PUSH_TO_HUB"] = "true" if args.push_to_hub else "false"
-    if args.hf_repo_id:
-        env["AIC_IMG2POS_HF_REPO_ID"] = args.hf_repo_id
-    if args.hf_revision:
-        env["AIC_IMG2POS_HF_REVISION"] = args.hf_revision
-    env["AIC_IMG2POS_UPLOAD_ON_PORT_TYPE"] = args.upload_on_port_type
-    env["AIC_IMG2POS_HF_PRIVATE"] = "true" if args.hf_private else "false"
+    env["AIC_IMG2POS_VAL_RATIO"] = str(args.val_ratio)
+    env["AIC_IMG2POS_TEST_RATIO"] = str(args.test_ratio)
 
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MIN_MM", args.dx_min_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MAX_MM", args.dx_max_mm)
@@ -325,6 +347,8 @@ def _policy_environment(
     _set_optional_env(env, "AIC_PORT_COLLECT_DY_MAX_MM", args.dy_max_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DZ_MIN_MM", args.dz_min_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DZ_MAX_MM", args.dz_max_mm)
+    env["AIC_PORT_COLLECT_SAMPLING_TIERS_MM"] = args.sampling_tiers_mm
+    env["AIC_PORT_COLLECT_SAMPLING_TIER_WEIGHTS"] = args.sampling_tier_weights
     env["AIC_PORT_COLLECT_ROLL_LIMIT_DEG"] = str(args.port_roll_limit_deg)
     env["AIC_PORT_COLLECT_PITCH_LIMIT_DEG"] = str(args.port_pitch_limit_deg)
     env["AIC_PORT_COLLECT_YAW_LIMIT_DEG"] = str(args.port_yaw_limit_deg)
@@ -340,9 +364,23 @@ def _policy_environment(
     env["AIC_PORT_COLLECT_BASE_Z_OFFSET_M"] = str(args.base_z_offset_mm / 1000.0)
     env["AIC_COLLECT_SYNC_TOLERANCE_MS"] = str(args.sync_tolerance_ms)
     env["AIC_COLLECT_SYNC_WAIT_TIMEOUT_SEC"] = str(args.sync_wait_timeout_s)
+    env["AIC_COLLECT_SETTLE_TIMEOUT_SEC"] = str(args.settle_timeout_s)
+    env["AIC_COLLECT_SETTLE_POSITION_TOLERANCE_MM"] = str(
+        args.settle_position_tolerance_mm
+    )
+    env["AIC_COLLECT_SETTLE_ORIENTATION_TOLERANCE_DEG"] = str(
+        args.settle_orientation_tolerance_deg
+    )
+    env["AIC_COLLECT_SETTLE_STABLE_OBSERVATIONS"] = str(
+        args.settle_stable_observations
+    )
+    env["AIC_COLLECT_SETTLE_POLL_SEC"] = str(args.settle_poll_s)
+    env["AIC_COLLECT_CAPTURE_ATTEMPT_MULTIPLIER"] = str(
+        args.capture_attempt_multiplier
+    )
     env["AIC_COLLECT_COLOR_LOG"] = "true" if args.color_log else "false"
     env["RMW_IMPLEMENTATION"] = env.get("RMW_IMPLEMENTATION", "rmw_zenoh_cpp")
-    env["ZENOH_CONFIG_OVERRIDE"] = "transport/shared_memory/enabled=false"
+    _apply_worker_isolation(env, args)
     env["RCUTILS_COLORIZED_OUTPUT"] = "0"
     env["RCUTILS_LOGGING_BUFFERED_STREAM"] = "1"
     return env
@@ -354,6 +392,7 @@ def start_policy(
     stop_file: Path,
     run_id: str,
     trial_index: int | None = None,
+    trial_split: str = "",
 ) -> subprocess.Popen:
     """PortOffsetCollect ROS 2 node를 독립 session/PGID로 실행한다."""
     env = _policy_environment(
@@ -361,6 +400,7 @@ def start_policy(
         stop_file=stop_file,
         run_id=run_id,
         trial_index=trial_index,
+        trial_split=trial_split,
     )
     try:
         stop_file.unlink()
@@ -427,18 +467,103 @@ def start_gazebo(
     if args.headless or not args.launch_rviz:
         launch_args.append("launch_rviz:=false")
 
-    args_str = " ".join(shlex.quote(value) for value in launch_args)
+    launch_cmd = shlex.join(
+        ["ros2", "launch", "aic_bringup", "aic_gz_bringup.launch.py", *launch_args]
+    )
+    domain_id = int(getattr(args, "worker_ros_domain_id", args.ros_domain_id_base))
+    zenoh_port = int(getattr(args, "worker_zenoh_port", args.zenoh_port_base))
+    partition = str(getattr(args, "worker_gz_partition", f"phy_{domain_id}"))
+    router_override = ";".join(
+        [
+            'mode="router"',
+            f'listen/endpoints=["tcp/[::]:{zenoh_port}"]',
+            "connect/endpoints=[]",
+            "routing/router/peers_failover_brokering=true",
+            "transport/shared_memory/enabled=false",
+        ]
+    )
     exports = [
-        'export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_zenoh_cpp}"',
-        'export ZENOH_CONFIG_OVERRIDE="transport/shared_memory/enabled=false"',
-        'export RCUTILS_COLORIZED_OUTPUT="0"',
-        'export RCUTILS_LOGGING_BUFFERED_STREAM="1"',
+        ". /ws_aic/install/setup.bash",
+        "export RMW_IMPLEMENTATION=rmw_zenoh_cpp",
+        f"export ROS_DOMAIN_ID={domain_id}",
+        f"export GZ_PARTITION={shlex.quote(partition)}",
+        f"export IGN_PARTITION={shlex.quote(partition)}",
+        "export RCUTILS_COLORIZED_OUTPUT=0",
+        "export RCUTILS_LOGGING_BUFFERED_STREAM=1",
         f"export {RUN_MARKER_ENV}={shlex.quote(run_id)}",
+        "export ZENOH_ROUTER_CONFIG_URI=/aic_zenoh_config.json5",
+        f"export ZENOH_CONFIG_OVERRIDE={shlex.quote(router_override)}",
+        "ros2 run rmw_zenoh_cpp rmw_zenohd &",
+        "router_pid=$!",
+        "cleanup_router() { kill -SIGINT \"$router_pid\" 2>/dev/null || true; wait \"$router_pid\" 2>/dev/null || true; }",
+        "trap cleanup_router EXIT",
+        f"export ZENOH_CONFIG_OVERRIDE={shlex.quote(_peer_zenoh_override(zenoh_port))}",
+        launch_cmd,
     ]
-    inner = " && ".join([*exports, f"/entrypoint.sh {args_str}"])
+    inner = "\n".join(["set -e", *exports])
     cmd = ["distrobox", "enter", args.distrobox, "--", "bash", "-lc", inner]
     print("[gazebo] " + shlex.join(cmd))
     return _start_logged_process(cmd, cwd=PIXI_WS)
+
+
+def _project_hf_token() -> str | None:
+    """환경변수 또는 ws_aic/.env에서 Hugging Face token을 읽는다."""
+    token = os.environ.get("HF_TOKEN", "").strip()
+    if token:
+        return token
+    env_path = WS_SRC.parent / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "HF_TOKEN":
+            return value.strip().strip("\"'") or None
+    return None
+
+
+def upload_dataset(args: argparse.Namespace) -> str | None:
+    """모든 trial이 끝난 dataset을 한 번만 지정 HF branch에 업로드한다."""
+    if not args.push_to_hub:
+        return None
+    from huggingface_hub import HfApi
+
+    token = _project_hf_token()
+    api = HfApi(token=token)
+    api.whoami()
+    api.create_repo(
+        repo_id=args.hf_repo_id,
+        repo_type="dataset",
+        private=args.hf_private,
+        exist_ok=True,
+    )
+    revision = args.hf_revision.strip() or args.dataset_version
+    if revision != "main":
+        branches = [
+            ref.name
+            for ref in api.list_repo_refs(args.hf_repo_id, repo_type="dataset").branches
+        ]
+        if revision not in branches:
+            api.create_branch(
+                repo_id=args.hf_repo_id,
+                repo_type="dataset",
+                branch=revision,
+            )
+    api.upload_large_folder(
+        repo_id=args.hf_repo_id,
+        repo_type="dataset",
+        revision=revision,
+        folder_path=str(dataset_dir(args)),
+        ignore_patterns=["*.tmp", "*.lock", "__pycache__/*", ".DS_Store"],
+        private=args.hf_private,
+    )
+    url = (
+        f"https://huggingface.co/datasets/{args.hf_repo_id}/tree/"
+        f"{quote(revision, safe='')}"
+    )
+    print(f"[huggingface] upload complete: {url}")
+    return url
 
 
 def known_episode_summaries() -> set[Path]:

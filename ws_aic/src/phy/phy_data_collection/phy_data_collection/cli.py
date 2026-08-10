@@ -13,7 +13,6 @@ from .constants import (
     POLICY_MODULE,
     PORT_ORDER_CHOICES,
     TRIAL_TIMEOUT_GRACE_S,
-    UPLOAD_PORT_TYPE_CHOICES,
 )
 
 
@@ -40,6 +39,7 @@ def _add_argument(
 def _add_trial_args(parser: argparse.ArgumentParser) -> None:
     """trial 개수, 순서, simulator 시작과 관련된 기본 인자를 추가한다."""
     _add_argument(parser, "trials", type=int)
+    _add_argument(parser, "workers", type=int)
     _add_argument(parser, "seed", type=int)
     _add_argument(parser, "port_types")
     _add_argument(parser, "port_order", choices=PORT_ORDER_CHOICES)
@@ -53,8 +53,11 @@ def _add_trial_args(parser: argparse.ArgumentParser) -> None:
         help=f"Defaults to time-limit-s + {TRIAL_TIMEOUT_GRACE_S:g}s.",
     )
     _add_argument(parser, "distrobox")
-    _add_argument(parser, "headless", action="store_true")
+    _add_argument(parser, "headless", action=argparse.BooleanOptionalAction)
     _add_argument(parser, "launch_rviz", type=_parse_bool, metavar=BOOLEAN_METAVAR)
+    _add_argument(parser, "ros_domain_id_base", type=int)
+    _add_argument(parser, "zenoh_port_base", type=int)
+    _add_argument(parser, "worker_start_delay_s", type=float)
     parser.add_argument("--engine-setup", default=ENGINE_SETUP)
     parser.add_argument("--policy", default=POLICY_MODULE)
     _add_argument(parser, "policy_start_wait_s", type=float)
@@ -65,14 +68,12 @@ def _add_trial_args(parser: argparse.ArgumentParser) -> None:
 def _add_dataset_args(parser: argparse.ArgumentParser) -> None:
     """dataset 경로와 Hugging Face 업로드 관련 인자를 추가한다."""
     _add_argument(parser, "dataset_version")
+    _add_argument(parser, "resume", action="store_true")
+    _add_argument(parser, "val_ratio", type=float)
+    _add_argument(parser, "test_ratio", type=float)
     _add_argument(parser, "push_to_hub", type=_parse_bool, metavar=BOOLEAN_METAVAR)
     _add_argument(parser, "hf_repo_id")
     _add_argument(parser, "hf_revision")
-    _add_argument(
-        parser,
-        "upload_on_port_type",
-        choices=UPLOAD_PORT_TYPE_CHOICES,
-    )
     _add_argument(parser, "hf_private", action="store_true")
 
 
@@ -114,12 +115,20 @@ def _add_pose_args(parser: argparse.ArgumentParser) -> None:
     ):
         _add_argument(parser, name, type=float)
     _add_argument(parser, "min_visible_cameras", type=int)
+    _add_argument(parser, "sampling_tiers_mm")
+    _add_argument(parser, "sampling_tier_weights")
 
 
 def _add_sync_args(parser: argparse.ArgumentParser) -> None:
     """sample timestamp 허용 오차와 늦은 source 대기시간을 추가한다."""
     _add_argument(parser, "sync_tolerance_ms", type=float)
     _add_argument(parser, "sync_wait_timeout_s", type=float)
+    _add_argument(parser, "settle_timeout_s", type=float)
+    _add_argument(parser, "settle_position_tolerance_mm", type=float)
+    _add_argument(parser, "settle_orientation_tolerance_deg", type=float)
+    _add_argument(parser, "settle_stable_observations", type=int)
+    _add_argument(parser, "settle_poll_s", type=float)
+    _add_argument(parser, "capture_attempt_multiplier", type=float)
 
 
 def _add_world_args(parser: argparse.ArgumentParser) -> None:

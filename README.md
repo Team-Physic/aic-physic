@@ -11,11 +11,14 @@ AI for Industry Challenge는 시뮬레이션 환경에서 UR5e 로봇 팔이 케
 
 ## 주요 기능
 
-- 포트 기준 XYZ/RPY offset을 계층화 샘플링해 로봇 목표 자세 생성
+- 50/10/5/2mm tier별 XYZ/RPY offset을 집중 샘플링
+- plug와 port 사이에 기본 20mm 안전거리를 유지해 접촉 없이 촬영
+- controller reference와 실제 TCP 움직임 수렴 뒤 timestamp가 일치하는 카메라 frame 저장
 - 좌·중앙·우 카메라와 controller state의 ROS timestamp 동기화 검사
 - 캡처 시점의 TF를 조회해 영상과 ground-truth label의 시각 일치 보장
 - 포트가 기본 2개 이상의 카메라에 보이는 sample만 저장
-- trial 단위 train/validation 분할과 compact JPEG·JSONL 생성
+- trial 단위 train/validation/test 분할과 compact JPEG·JSONL 생성
+- 독립 Zenoh/Gazebo partition을 사용한 headless 병렬 수집
 - 선택적 Hugging Face Dataset 업로드
 
 ## 저장소 구조
@@ -89,11 +92,11 @@ cd aic-physic/ws_aic/src
 
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
-  --trials 2 \
-  --samples-per-trial 20 \
-  --dataset-version trial-001 \
-  --push-to-hub false \
-  --cleanup
+  --trials 100 \
+  --workers 2 \
+  --samples-per-trial 40 \
+  --dataset-version img2pos-v1 \
+  --push-to-hub false
 ```
 
 전체 CLI와 데이터 형식은
@@ -104,16 +107,17 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 
 | 환경변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `AIC_COLLECT_STEPS` | `1000` | trial당 offset sample 수 |
+| `AIC_COLLECT_STEPS` | runner에서 `40` | trial당 저장할 offset capture 수 |
 | `AIC_IMG2POS_DATASET_VERSION` | 빈 문자열 | 데이터셋 하위 버전 디렉터리 |
 | `AIC_IMG2POS_DATASET_DIR` | `ws_aic/data/img2pos[/<version>]` | 데이터셋 출력 위치 |
 | `AIC_IMG2POS_MIN_VISIBLE_CAMERAS` | `2` | 저장에 필요한 최소 카메라 수 |
 | `AIC_IMG2POS_VISIBILITY_MARGIN_PX` | `64.0` | 영상 경계로부터 필요한 여백 |
 | `AIC_COLLECT_SYNC_TOLERANCE_MS` | `30.0` | camera/controller/TF 허용 시각 차이 |
-| `AIC_IMG2POS_VAL_RATIO` | `0.3` | validation trial 비율 |
+| `AIC_IMG2POS_VAL_RATIO` | `0.15` | validation trial 비율 |
+| `AIC_IMG2POS_TEST_RATIO` | `0.15` | test trial 비율 |
 | `AIC_COLLECT_RANDOM_SEED` | 미지정 | offset 샘플링 재현용 seed |
-| `AIC_IMG2POS_PUSH_TO_HUB` | `true` | 수집 완료 후 Hugging Face 업로드 여부 |
-| `AIC_IMG2POS_HF_REPO_ID` | 빈 문자열 | 업로드할 Hugging Face Dataset 저장소 |
+| `AIC_COLLECT_SETTLE_TIMEOUT_SEC` | `8.0` | reference와 실제 TCP 움직임 수렴 제한시간 |
+| `AIC_PORT_COLLECT_BASE_Z_OFFSET_M` | `0.020` | port 접근축 방향 최소 안전거리 |
 
 XYZ/RPY 범위는 `AIC_PORT_COLLECT_DX_MIN_MM`처럼
 `AIC_PORT_COLLECT_<AXIS>_MIN/MAX_*` 환경변수로 조정할 수 있습니다.
@@ -128,12 +132,17 @@ img2pos/<version>/
 ├── samples.jsonl
 └── images/
     ├── train/<camera>/*.jpg
-    └── val/<camera>/*.jpg
+    ├── val/<camera>/*.jpg
+    └── test/<camera>/*.jpg
 ```
 
 `samples.jsonl`은 카메라 이미지 한 장당 한 행이며 이미지 경로, camera/connector,
-`target_xyz_m`, 촬영 시각과 최대 동기화 오차만 기록합니다. 같은 `trial_id`는 항상
-같은 split에 배정되어 train/validation 사이의 trial 누수를 막습니다.
+`target_xyz_m`, 안전거리 기준 실제 port-local sampling offset, sampling tier,
+촬영 시각·동기화 오차, pose 수렴 품질을 기록합니다.
+같은 `trial_id`는 항상
+같은 split에 배정되어 train/validation/test 사이의 trial 누수를 막습니다. 수집 완료 후
+`collection_summary.json`으로 실제 capture 수와 tier·안전거리 기준
+±2/5/10/50mm sampling offset 분포를 검증합니다.
 
 ## 협업 규칙
 
