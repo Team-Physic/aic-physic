@@ -143,6 +143,7 @@ PortOffset sample이 visibility 또는 timestamp 조건을 통과하지 못하�
 ### 1-2. rosbag 자동 녹화
 
 `--record-rosbag true`는 각 trial을 독립 MCAP으로 기록하며, offline sample 일치 검사의 원본 데이터로 사용합니다.
+Recorder는 `--use-sim-time`으로 실행되고 `phy_event_timestamp_clock=ros_sim`을 rosbag metadata에 남깁니다. 따라서 image source `header.stamp`와 MCAP 기록 시각을 같은 simulation clock에서 비교할 수 있습니다.
 
 ```text
 Gazebo + Zenoh 시작
@@ -229,9 +230,13 @@ pixi run ros2 run phy_data_collection validate_portoffset_trial \
   --rosbag "$(git rev-parse --show-toplevel)/rosbags/portoffset/0726-001/<run-id>/<trial-dir>"
 ```
 
+Source image stamp부터 MCAP 기록까지의 지연 상한도 합격 조건으로 적용하려면 허용할 값으로 `--max-record-delay-ms <ms>`를 추가합니다.
+
 | 검사 항목 | 합격 조건 | 단위 |
 |---|---|---|
+| camera 촬영 event | camera 이름, source `header.stamp`, source JPEG SHA-256으로 만든 event가 dataset의 stamp·JPEG와 일치 | `ns`, SHA-256 |
 | 저장 JPEG | 동일 camera와 `header.stamp`의 MCAP Image를 수집기와 같은 방식으로 JPEG encoding한 결과와 일치 | `byte` |
+| source→MCAP 기록 지연 | `record_stamp - header.stamp`가 음수가 아니며, 지정한 `--max-record-delay-ms` 이하 | `ns`, `ms` |
 | 세 camera 시각 | `max(left, center, right) - min(left, center, right) <= sync_tolerance` | `ns`, 보고서에 `ms` 병기 |
 | ControllerState 시각 | `abs(controller - center_image) <= sync_tolerance` | `ns`, 보고서에 `ms` 병기 |
 | port entrance | trial 시작 snapshot과 capture 시각의 위치 차이 `0.1 mm`, 회전 차이 `0.001 rad` 이하 | `mm`, `rad` |
@@ -239,6 +244,10 @@ pixi run ros2 run phy_data_collection validate_portoffset_trial \
 | `location`, `label` | MCAP port/plug TF와 plug local offset으로 재계산한 값의 위치 차이 `0.1 mm`, 회전 차이 `0.001 rad` 이하 | `mm`, `rad` |
 
 결과는 기본적으로 trial rosbag 디렉터리의 `portoffset_validation.json`에 기록되며, 전체 sample이 합격하면 exit code `0`, 불합격 sample이 있으면 `1`, 입력 또는 실행 오류는 `2`를 반환합니다. 보고서에는 sample별 `PASS/FAIL`, camera/controller/plug TF 시각 차이, TF와 label 오차 및 실패 원인이 포함됩니다.
+
+Camera event의 source 경계는 Gazebo 원본을 ROS로 전달한 `ros_gz_bridge` 출력 `/left_camera/image`, `/center_camera/image`, `/right_camera/image`입니다. 검증기는 이 source frame과 dataset JPEG가 같은 영상인지 byte 단위로 검사하고, source stamp가 dataset metadata까지 보존됐는지 확인합니다. Gazebo 내부에서 `sensor_msgs/Image.header.stamp`가 render/capture event 시각이라는 의미는 simulator 기준 전제로 보고서에 명시합니다.
+
+기존 rosbag처럼 simulation-time recorder 표식이 없는 입력도 이미지와 source stamp는 검증할 수 있습니다. 다만 MCAP record timestamp의 clock domain을 확정할 수 없으므로 source→MCAP 기록 지연은 `unavailable`로 보고하고 `--max-record-delay-ms` 판정에는 사용하지 않습니다.
 
 새로 수집한 metadata는 `collection.run_id`, `collection.trial_index`, `collection.rosbag_path`로 MCAP을 정확히 연결합니다. 기존 metadata에는 이 값이 없으므로 `--sample-id <id>`를 명시해 검사합니다.
 

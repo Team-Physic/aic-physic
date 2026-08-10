@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
+
 
 def build_parser() -> argparse.ArgumentParser:
     """offline 검증에 필요한 dataset, rosbag, sample 선택 인자를 정의한다."""
@@ -25,12 +27,29 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Output JSON path; defaults to <rosbag>/portoffset_validation.json.",
     )
+    parser.add_argument(
+        "--max-record-delay-ms",
+        type=float,
+        help=(
+            "Fail when source image stamp to MCAP record time exceeds this value. "
+            "Available only for bags recorded with ROS simulation time."
+        ),
+    )
     return parser
 
 
 def main() -> int:
     """검증을 실행하고 JSON 보고서 및 process exit status를 반환한다."""
     args = build_parser().parse_args()
+    if args.max_record_delay_ms is not None and (
+        not math.isfinite(args.max_record_delay_ms)
+        or args.max_record_delay_ms < 0
+    ):
+        print(
+            "[validation] ERROR: --max-record-delay-ms must be finite "
+            "and non-negative"
+        )
+        return 2
     try:
         from phy_data_collection.portoffset_validation import validate_trial
     except ModuleNotFoundError as exc:
@@ -50,6 +69,7 @@ def main() -> int:
             args.dataset_dir,
             rosbag_dir,
             set(args.sample_id) or None,
+            args.max_record_delay_ms,
         )
     except Exception as exc:
         print(f"[validation] ERROR: {exc}")
@@ -66,6 +86,20 @@ def main() -> int:
         f"passed={report['passed_sample_count']}, "
         f"failed={report['failed_sample_count']}, "
         f"report={report_path}"
+    )
+    events = report["camera_event_validation"]
+    delay = events["record_delay"]
+    delay_text = (
+        f"mean={delay['mean_ms']:.3f}ms, p95={delay['p95_ms']:.3f}ms, "
+        f"max={delay['max_ms']:.3f}ms"
+        if delay["available"]
+        else "unavailable"
+    )
+    print(
+        "[validation] camera events: "
+        f"passed={events['passed_event_count']}, "
+        f"failed={events['failed_event_count']}, "
+        f"record_delay={delay_text}"
     )
     return 0 if report["status"] == "PASS" else 1
 

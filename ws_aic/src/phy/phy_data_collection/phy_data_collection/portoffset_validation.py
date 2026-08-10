@@ -11,6 +11,7 @@ from typing import Any
 import cv2
 import numpy as np
 import rosbag2_py
+import yaml
 from data_generator.port_offset_config import (
     SFP_PLUG_REFERENCE_OFFSET_IN_CABLE_TIP_FRAME,
     TF_RECONSTRUCTION_ANGLE_TOLERANCE_RAD,
@@ -23,6 +24,13 @@ from rclpy.time import Time
 from rosidl_runtime_py.utilities import get_message
 from tf2_ros import Buffer, TransformException
 
+from phy_data_collection.camera_event_validation import (
+    SIMULATION_CLOCK,
+    SourceImageEvent,
+    summarize_record_delays,
+    validate_image_event,
+)
+
 
 CAMERA_TOPICS = {
     "left": "/left_camera/image",
@@ -33,6 +41,7 @@ CONTROLLER_TOPIC = "/aic_controller/controller_state"
 TF_TOPICS = {"/tf", "/tf_static", "/scoring/tf"}
 POSITION_TOLERANCE_M = TF_RECONSTRUCTION_POSITION_TOLERANCE_M
 ANGLE_TOLERANCE_RAD = TF_RECONSTRUCTION_ANGLE_TOLERANCE_RAD
+ROSBAG_EVENT_CLOCK_KEY = "phy_event_timestamp_clock"
 
 
 @dataclass
@@ -114,6 +123,19 @@ def encoded_jpeg(message: Any) -> bytes:
     if not success:
         raise ValueError("OpenCV JPEG encoding failed")
     return data.tobytes()
+
+
+def read_rosbag_record_clock(rosbag_dir: Path) -> str:
+    """rosbag metadata에 명시된 record timestamp clock을 읽는다."""
+    metadata_path = rosbag_dir / "metadata.yaml"
+    try:
+        metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+        info = metadata.get("rosbag2_bagfile_information", {})
+        custom_data = info.get("custom_data", {}) or {}
+        value = str(custom_data.get(ROSBAG_EVENT_CLOCK_KEY, "")).strip()
+    except (OSError, AttributeError, TypeError, yaml.YAMLError):
+        return "unknown"
+    return value or "unknown"
 
 
 def _transform_arrays(stamped: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -264,7 +286,12 @@ def _offset_differences(
 def read_trial_sources(
     rosbag_dir: Path,
     samples: list[SampleMetadata],
-) -> tuple[dict[tuple[str, int], list[bytes]], set[int], Buffer, dict[str, int]]:
+) -> tuple[
+    dict[tuple[str, int], list[SourceImageEvent]],
+    set[int],
+    Buffer,
+    dict[str, int],
+]:
     """필요한 image/controller message와 전체 TF tree를 trial MCAP에서 읽는다."""
     image_keys = {
         (CAMERA_TOPICS[camera], int(stamp))
@@ -275,7 +302,7 @@ def read_trial_sources(
         int(sample.common["timestamps"]["controller_stamp_ns"])
         for sample in samples
     }
-    images: dict[tuple[str, int], list[bytes]] = {}
+    images: dict[tuple[str, int], list[SourceImageEvent]] = {}
     seen_controllers: set[int] = set()
     counts = {"image": 0, "controller": 0, "tf": 0}
     buffer = Buffer(cache_time=Duration(seconds=86_400.0))
@@ -293,7 +320,7 @@ def read_trial_sources(
     }
     reader.set_filter(rosbag2_py.StorageFilter(topics=list(message_types)))
     while reader.has_next():
-        topic, serialized, _ = reader.read_next()
+        topic, serialized, record_stamp_ns = reader.read_next()
         if topic not in message_types:
             continue
         message = deserialize_message(serialized, message_types[topic])
@@ -301,7 +328,14 @@ def read_trial_sources(
             counts["image"] += 1
             key = (topic, int(Time.from_msg(message.header.stamp).nanoseconds))
             if key in image_keys:
-                images.setdefault(key, []).append(encoded_jpeg(message))
+                images.setdefault(key, []).append(
+                    SourceImageEvent(
+                        topic=topic,
+                        header_stamp_ns=key[1],
+                        record_stamp_ns=int(record_stamp_ns),
+                        jpeg=encoded_jpeg(message),
+                    )
+                )
         elif topic == CONTROLLER_TOPIC:
             counts["controller"] += 1
             stamp_ns = int(Time.from_msg(message.header.stamp).nanoseconds)
@@ -321,9 +355,11 @@ def read_trial_sources(
 def validate_sample(
     sample: SampleMetadata,
     dataset_dir: Path,
-    images: dict[tuple[str, int], list[bytes]],
+    images: dict[tuple[str, int], list[SourceImageEvent]],
     controllers: set[int],
     tf_buffer: Buffer,
+    record_clock: str,
+    max_record_delay_ns: int | None,
 ) -> dict[str, Any]:
     """한 sample의 영상, source 시각 차이, TF와 label을 검증한다."""
     record = sample.common
@@ -354,17 +390,32 @@ def validate_sample(
     image_checks = {}
     for camera, stamp_ns in image_stamps.items():
         key = (CAMERA_TOPICS[camera], stamp_ns)
-        messages = images.get(key, [])
-        check = {"topic": key[0], "timestamp_ns": stamp_ns, "mcap_message_found": bool(messages)}
-        if not messages:
+        source_events = images.get(key, [])
+        check = {
+            "topic": key[0],
+            "timestamp_ns": stamp_ns,
+            "mcap_message_found": bool(source_events),
+        }
+        if not source_events:
             errors.append(f"{camera} image timestamp is missing from MCAP")
         if camera in sample.records:
             image_path = dataset_dir / sample.records[camera]["image"]
             saved = image_path.read_bytes() if image_path.is_file() else b""
+            event_check = validate_image_event(
+                camera=camera,
+                dataset_stamp_ns=stamp_ns,
+                dataset_jpeg=saved,
+                source_events=source_events,
+                record_clock=record_clock,
+                max_record_delay_ns=max_record_delay_ns,
+            )
             check["jpeg_path"] = str(image_path)
-            check["jpeg_matches_mcap"] = bool(saved and saved in messages)
-            if not check["jpeg_matches_mcap"]:
-                errors.append(f"{camera} JPEG does not match the MCAP image")
+            check["jpeg_matches_mcap"] = event_check["jpeg_matches_source"]
+            check["event"] = event_check
+            errors.extend(f"{camera}: {error}" for error in event_check["errors"])
+            warnings.extend(
+                f"{camera}: {warning}" for warning in event_check["warnings"]
+            )
         image_checks[camera] = check
 
     port_candidates, plug_candidates = _candidate_frames(record)
@@ -480,8 +531,13 @@ def validate_trial(
     dataset_dir: Path,
     rosbag_dir: Path,
     sample_ids: set[str] | None = None,
+    max_record_delay_ms: float | None = None,
 ) -> dict[str, Any]:
     """하나의 trial MCAP과 연결된 모든 dataset sample을 검증한다."""
+    if max_record_delay_ms is not None and (
+        not math.isfinite(max_record_delay_ms) or max_record_delay_ms < 0
+    ):
+        raise ValueError("max_record_delay_ms must be finite and non-negative")
     dataset_dir = dataset_dir.expanduser().resolve()
     rosbag_dir = rosbag_dir.expanduser().resolve()
     if rosbag_dir.is_file() and rosbag_dir.suffix == ".mcap":
@@ -491,14 +547,40 @@ def validate_trial(
         rosbag_dir,
         sample_ids,
     )
+    record_clock = read_rosbag_record_clock(rosbag_dir)
+    if record_clock != SIMULATION_CLOCK:
+        warnings.append(
+            "rosbag record clock is not marked as ROS simulation time; "
+            "source-to-MCAP record delay is unavailable"
+        )
+    max_record_delay_ns = (
+        int(max_record_delay_ms * 1_000_000)
+        if max_record_delay_ms is not None
+        else None
+    )
     images, controllers, tf_buffer, counts = read_trial_sources(rosbag_dir, samples)
     results = [
-        validate_sample(sample, dataset_dir, images, controllers, tf_buffer)
+        validate_sample(
+            sample,
+            dataset_dir,
+            images,
+            controllers,
+            tf_buffer,
+            record_clock,
+            max_record_delay_ns,
+        )
         for sample in samples
     ]
     passed = sum(result["status"] == "PASS" for result in results)
+    event_results = [
+        image["event"]
+        for result in results
+        for image in result["images"].values()
+        if "event" in image
+    ]
+    passed_events = sum(event["status"] == "PASS" for event in event_results)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "PASS" if passed == len(results) else "FAIL",
         "dataset_dir": str(dataset_dir),
         "rosbag_dir": str(rosbag_dir),
@@ -510,6 +592,18 @@ def validate_trial(
         "transform_tolerances": {
             "position_m": POSITION_TOLERANCE_M,
             "angle_rad": ANGLE_TOLERANCE_RAD,
+        },
+        "camera_event_validation": {
+            "source_boundary": "ros_gz_bridge_output",
+            "simulator_capture_stamp_assumption": (
+                "sensor_msgs/Image.header.stamp is the Gazebo render/capture event time"
+            ),
+            "record_clock": record_clock,
+            "max_record_delay_ms": max_record_delay_ms,
+            "event_count": len(event_results),
+            "passed_event_count": passed_events,
+            "failed_event_count": len(event_results) - passed_events,
+            "record_delay": summarize_record_delays(event_results),
         },
         "sample_count": len(results),
         "passed_sample_count": passed,
