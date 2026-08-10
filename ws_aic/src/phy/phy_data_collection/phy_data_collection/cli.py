@@ -73,6 +73,12 @@ def _add_dataset_args(parser: argparse.ArgumentParser) -> None:
     _add_argument(parser, "resume", action="store_true")
     _add_argument(parser, "val_ratio", type=float)
     _add_argument(parser, "test_ratio", type=float)
+    _add_argument(
+        parser,
+        "auto_annotate_ports",
+        type=_parse_bool,
+        metavar=BOOLEAN_METAVAR,
+    )
     _add_argument(parser, "push_to_hub", type=_parse_bool, metavar=BOOLEAN_METAVAR)
     _add_argument(parser, "hf_repo_id")
     _add_argument(parser, "hf_revision")

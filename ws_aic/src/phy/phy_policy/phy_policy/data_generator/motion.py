@@ -842,6 +842,7 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 label_xyz=label_xyz,
                 sample=sample,
                 settle=settle,
+                annotation_ports=context.get("annotation_ports", ()),
             )
             if saved:
                 context["counts"]["collect"] += 1

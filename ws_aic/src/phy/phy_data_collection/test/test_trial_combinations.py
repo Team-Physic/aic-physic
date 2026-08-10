@@ -100,7 +100,30 @@ def test_policy_environment_contains_trial_index(tmp_path):
     assert env["AIC_COLLECT_SETTLE_ORIENTATION_TOLERANCE_RAD"] == str(
         args.settle_orientation_tolerance_rad
     )
+    assert env["AIC_IMG2POS_AUTO_ANNOTATE_PORTS"] == "false"
     assert not any(name.endswith("_DEG") for name in env)
+
+
+def test_auto_annotate_ports_cli_enables_policy_environment(tmp_path):
+    args = build_parser().parse_args(
+        [
+            "--dry-run",
+            "--port-type",
+            "sfp",
+            "--auto-annotate-ports",
+            "true",
+        ]
+    )
+    args.seed = 7
+    main._prepare_args(args)
+
+    env = runtime._policy_environment(
+        args,
+        stop_file=tmp_path / "stop",
+        run_id="run",
+    )
+
+    assert env["AIC_IMG2POS_AUTO_ANNOTATE_PORTS"] == "true"
 
 
 def test_metadata_contains_seed_and_total_trials(monkeypatch, tmp_path):

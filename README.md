@@ -116,6 +116,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `AIC_IMG2POS_DATASET_VERSION` | 빈 문자열 | 데이터셋 하위 버전 디렉터리 |
 | `AIC_IMG2POS_DATASET_DIR` | `ws_aic/data/img2pos[/<version>]` | 데이터셋 출력 위치 |
 | `AIC_IMG2POS_MIN_VISIBLE_CAMERAS` | `2` | 저장에 필요한 최소 카메라 수 |
+| `AIC_IMG2POS_AUTO_ANNOTATE_PORTS` | `false` | 활성 포트 bbox/4-keypoint YOLO-pose annotation 생성 |
 | `AIC_IMG2POS_VISIBILITY_MARGIN_PX` | `64.0` | 영상 경계로부터 필요한 여백 |
 | `AIC_COLLECT_SYNC_TOLERANCE_MS` | `30.0` | camera/controller/TF 허용 시각 차이 |
 | `AIC_IMG2POS_VAL_RATIO` | `0.15` | validation trial 비율 |
@@ -136,10 +137,10 @@ img2pos/<version>/
 ├── data.yaml
 ├── metadata.jsonl
 ├── samples.jsonl
-└── images/
-    ├── train/<camera>/*.jpg
-    ├── val/<camera>/*.jpg
-    └── test/<camera>/*.jpg
+├── yolo_pose.yaml
+├── labels -> annotations
+├── images/<train|val|test>/<camera>/trial_<index>/*.jpg
+└── annotations/<train|val|test>/<camera>/trial_<index>/*.txt
 ```
 
 `metadata.jsonl`은 수집 실행마다 자동 생성된 `seed`와 총 `trials`를 한 행으로 기록합니다.
@@ -150,6 +151,14 @@ sampling tier, 촬영 시각·동기화 오차, pose 수렴 품질을 한 번만
 같은 split에 배정되어 train/validation/test 사이의 trial 누수를 막습니다. 수집 완료 후
 `collection_summary.json`으로 실제 capture 수를 확인하고, `near-port` capture에 대해서만
 tier·안전거리 기준 ±2/5/10/50mm sampling offset 분포를 검증합니다.
+
+`--auto-annotate-ports true`를 지정하면 scene의 활성 포트마다 실제 외곽 4점과 그
+min/max bbox를 YOLO-pose 형식으로 함께 저장합니다. 실제 TXT는 `annotations/`에 있고,
+Ultralytics가 기본 `labels/` 경로로도 읽을 수 있도록 symlink를 생성합니다. 자세한 class,
+keypoint 순서와 치수는
+[`phy_data_collection/README.md`](ws_aic/src/phy/phy_data_collection/README.md#데이터셋)를
+참고하십시오. SFP label은 0부터 세는 rail/port를 결합한 `SFP_<rail><port>`이며,
+예를 들어 rail 4의 port 1은 `SFP_41`입니다.
 
 ## 협업 규칙
 

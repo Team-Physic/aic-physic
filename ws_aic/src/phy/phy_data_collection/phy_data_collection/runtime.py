@@ -340,6 +340,9 @@ def _policy_environment(
     env["AIC_IMG2POS_DATASET_DIR"] = str(dataset_dir(args))
     env["AIC_IMG2POS_VAL_RATIO"] = str(args.val_ratio)
     env["AIC_IMG2POS_TEST_RATIO"] = str(args.test_ratio)
+    env["AIC_IMG2POS_AUTO_ANNOTATE_PORTS"] = (
+        "true" if args.auto_annotate_ports else "false"
+    )
 
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MIN_MM", args.dx_min_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MAX_MM", args.dx_max_mm)

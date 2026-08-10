@@ -6,6 +6,7 @@ import numpy as np
 from geometry_msgs.msg import Transform
 
 from phy_policy.data_generator import dataset
+from phy_policy.ros.PortOffsetCollect import PortOffsetCollect
 
 
 def test_points_projection_uses_full_image_bounds(monkeypatch):
@@ -278,3 +279,172 @@ def test_card_mask_reverses_to_rail_index_order():
     task = SimpleNamespace(id="portoffset_sfp_0000_cards10100_rail4_sfp_port_0")
 
     assert dataset._card_mask(task) == "00101"
+
+
+def test_port_outer_corners_apply_port_yaw():
+    transform = Transform()
+    transform.translation.x = 1.0
+    transform.translation.y = 2.0
+    transform.translation.z = 3.0
+    transform.rotation.z = np.sin(np.pi / 4.0)
+    transform.rotation.w = np.cos(np.pi / 4.0)
+
+    corners = np.asarray(dataset._port_outer_corners_base("sfp", transform))
+    width, height = dataset.PORT_OUTER_SIZE_M["sfp"]
+
+    assert np.allclose(corners[0], [1.0 - height / 2.0, 2.0 - width / 2.0, 3.0])
+    assert np.allclose(corners[2], [1.0 + height / 2.0, 2.0 + width / 2.0, 3.0])
+
+
+def test_yolo_pose_row_contains_bbox_and_four_outer_keypoints():
+    row = dataset._yolo_pose_row(
+        0,
+        {
+            "image_size_px": [200, 100],
+            "points": [
+                {"u_px": 20.0, "v_px": 10.0},
+                {"u_px": 100.0, "v_px": 10.0},
+                {"u_px": 100.0, "v_px": 50.0},
+                {"u_px": 20.0, "v_px": 50.0},
+            ],
+        },
+    )
+    values = row.split()
+
+    assert len(values) == 17
+    assert values[0] == "0"
+    assert np.allclose([float(value) for value in values[1:5]], [0.3, 0.3, 0.4, 0.4])
+    assert [int(values[index]) for index in (7, 10, 13, 16)] == [2, 2, 2, 2]
+
+
+def test_save_sample_writes_yolo_pose_annotations(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        dataset,
+        "_port_projection",
+        lambda *args, **kwargs: {"visible": True},
+    )
+    monkeypatch.setattr(
+        dataset,
+        "_port_outer_projection",
+        lambda *args, **kwargs: {
+            "visible": True,
+            "image_size_px": [100, 100],
+            "points": [
+                {"u_px": 10.0, "v_px": 20.0},
+                {"u_px": 30.0, "v_px": 20.0},
+                {"u_px": 30.0, "v_px": 40.0},
+                {"u_px": 10.0, "v_px": 40.0},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        dataset,
+        "image_to_bgr",
+        lambda *args, **kwargs: np.zeros((2, 2, 3), dtype=np.uint8),
+    )
+    policy = SimpleNamespace(
+        min_visible_cameras=2,
+        auto_annotate_ports=True,
+        dataset_dir=tmp_path,
+        samples_path=tmp_path / "samples.jsonl",
+        run_id="",
+        trial_index=0,
+        trial_split="train",
+        val_ratio=0.0,
+        test_ratio=0.0,
+        collection_policy="near-port",
+        capture_count=0,
+    )
+    observation = SimpleNamespace(
+        left_image=object(), center_image=object(), right_image=object()
+    )
+    task = SimpleNamespace(
+        id="portoffset_sfp_0000_cards00001_rail0_sfp_port_0",
+        port_type="sfp",
+        port_name="sfp_port_0",
+        target_module_name="nic_card_mount_0",
+    )
+
+    saved, _ = dataset.save_sample(
+        policy,
+        episode_name="20260811_120000_portoffset_sfp_0000_cards00001_rail0_sfp_port_0",
+        task=task,
+        step_idx=0,
+        observation=observation,
+        port_tf=Transform(),
+        timestamps={"sync_valid": True, "capture_stamp_ns": 1},
+        label_xyz=[0.0, 0.0, 0.0],
+        sample={
+            "actual_xyz_m": [0.0, 0.0, 0.0],
+            "tier_m": None,
+            "actual_view_distance_m": 0.5,
+        },
+        settle={
+            "position_error_m": 0.0,
+            "orientation_error_rad": 0.0,
+            "wait_ns": 0,
+        },
+        annotation_ports=[
+            {
+                "class_id": 9,
+                "label": "SFP_41",
+                "port_type": "sfp",
+                "transform": Transform(),
+            }
+        ],
+    )
+
+    record = json.loads(policy.samples_path.read_text(encoding="utf-8"))
+    center_annotation = tmp_path / record["annotations"]["center"]
+    assert saved
+    assert center_annotation.is_file()
+    assert len(center_annotation.read_text(encoding="utf-8").split()) == 17
+    assert center_annotation.read_text(encoding="utf-8").startswith("9 ")
+    assert record["annotation_format"] == "yolo_pose"
+    assert record["annotation_object_counts"] == {"left": 1, "center": 1, "right": 1}
+    assert record["annotation_labels"] == {
+        "left": ["SFP_41"],
+        "center": ["SFP_41"],
+        "right": ["SFP_41"],
+    }
+    dataset._write_yolo_pose_config(policy)
+    assert (tmp_path / "labels").is_symlink()
+    assert str((tmp_path / "labels").readlink()) == "annotations"
+    assert "kpt_shape: [4, 3]" in (tmp_path / "yolo_pose.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "9: SFP_41" in (tmp_path / "yolo_pose.yaml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_annotation_port_frames_follow_active_card_mask():
+    task = SimpleNamespace(
+        id="portoffset_sfp_0000_cards10100_rail4_sfp_port_0",
+        port_type="sfp",
+        port_name="sfp_port_0",
+        target_module_name="nic_card_mount_4",
+    )
+
+    ports = PortOffsetCollect._annotation_port_frames(
+        object(), task, "unused_fallback"
+    )
+
+    assert [port["instance_id"] for port in ports] == [
+        "nic_card_mount_2/sfp_port_0",
+        "nic_card_mount_2/sfp_port_1",
+        "nic_card_mount_4/sfp_port_0",
+        "nic_card_mount_4/sfp_port_1",
+    ]
+    assert [port["class_id"] for port in ports] == [4, 5, 8, 9]
+    assert [port["label"] for port in ports] == [
+        "SFP_20",
+        "SFP_21",
+        "SFP_40",
+        "SFP_41",
+    ]
+
+
+def test_sfp_annotation_class_uses_zero_based_rail_and_port():
+    assert dataset.port_annotation_class("sfp", 0, 0) == (0, "SFP_00")
+    assert dataset.port_annotation_class("sfp", 4, 1) == (9, "SFP_41")

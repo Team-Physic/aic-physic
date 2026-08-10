@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import threading
 import time
@@ -202,6 +203,9 @@ class PortOffsetCollect(Policy):
         self.test_ratio = _env_float("AIC_IMG2POS_TEST_RATIO", 0.15)
         self.trial_split = os.environ.get("AIC_IMG2POS_TRIAL_SPLIT", "").strip().lower()
         self.min_visible_cameras = max(1, int(os.environ.get("AIC_IMG2POS_MIN_VISIBLE_CAMERAS", "2")))
+        self.auto_annotate_ports = _env_bool(
+            "AIC_IMG2POS_AUTO_ANNOTATE_PORTS", False
+        )
         self.capture_count = 0
         self.record = _env_bool("AIC_IMG2POS_RECORD", True)
         xy_limit = _env_float("AIC_PORT_COLLECT_XY_LIMIT_MM", 50.0) / 1000.0
@@ -306,6 +310,73 @@ class PortOffsetCollect(Policy):
         entrance = f"{port}_entrance"
         return entrance if self._wait_for_tf("base_link", entrance, 2.0) else port
 
+    def _annotation_port_frames(self, task: Task, fallback_frame: str) -> list[dict]:
+        """task card mask에서 현재 scene에 생성된 port entrance frame을 나열한다."""
+        match = re.search(r"(?:^|_)cards([01]+)(?:_|$)", str(task.id))
+        connector = dataset._connector(task).lower()
+        if match is None or connector not in {"sfp", "sc"}:
+            rail = int(dataset._last_number(task.target_module_name, 0))
+            port = (
+                int(dataset._last_number(task.port_name, 0))
+                if connector == "sfp"
+                else 0
+            )
+            class_id, label = dataset.port_annotation_class(connector, rail, port)
+            return [
+                {
+                    "class_id": class_id,
+                    "label": label,
+                    "port_type": connector,
+                    "instance_id": str(task.port_name),
+                    "frame_id": fallback_frame,
+                }
+            ]
+        active_rails = [
+            rail for rail, enabled in enumerate(reversed(match.group(1))) if enabled == "1"
+        ]
+        if connector == "sfp":
+            ports = []
+            for rail in active_rails:
+                for port in range(dataset.SFP_PORT_COUNT):
+                    class_id, label = dataset.port_annotation_class(
+                        connector, rail, port
+                    )
+                    ports.append(
+                        {
+                            "class_id": class_id,
+                            "label": label,
+                            "port_type": connector,
+                            "instance_id": f"nic_card_mount_{rail}/sfp_port_{port}",
+                            "frame_id": (
+                                f"task_board/nic_card_mount_{rail}/"
+                                f"sfp_port_{port}_link_entrance"
+                            ),
+                        }
+                    )
+            return ports
+        class_id, label = dataset.port_annotation_class(connector, 0)
+        return [
+            {
+                "class_id": class_id,
+                "label": label,
+                "port_type": connector,
+                "instance_id": f"sc_port_{rail}/sc_port_base",
+                "frame_id": f"task_board/sc_port_{rail}/sc_port_base_link_entrance",
+            }
+            for rail in active_rails
+        ]
+
+    def _snapshot_annotation_ports(
+        self, task: Task, fallback_frame: str
+    ) -> list[dict]:
+        """현재 scene의 port frame들을 trial 고정 base_link Transform으로 저장한다."""
+        ports = self._annotation_port_frames(task, fallback_frame)
+        snapshots = []
+        for port in ports:
+            stamped = self.lookup_latest_stamped("base_link", port["frame_id"])
+            snapshots.append({**port, "transform": stamped.transform})
+        return snapshots
+
     def _cable_tip_frame(self, task: Task) -> str:
         """task 정보에서 사용 가능한 cable tip frame을 선택한다."""
         candidates = [
@@ -403,6 +474,19 @@ class PortOffsetCollect(Policy):
         except TransformException as exc:
             return self._finish(episode_dir, task, counts, "port_tf_snapshot_failed", str(exc))
 
+        annotation_ports = []
+        if self.auto_annotate_ports:
+            try:
+                annotation_ports = self._snapshot_annotation_ports(task, port_frame)
+            except TransformException as exc:
+                return self._finish(
+                    episode_dir,
+                    task,
+                    counts,
+                    "annotation_port_tf_snapshot_failed",
+                    str(exc),
+                )
+
         board_snapshot = None
         if self.collection_policy == "board-view":
             board_frame = self._board_frame()
@@ -423,6 +507,7 @@ class PortOffsetCollect(Policy):
             "counts": counts,
             "port_snapshot": port_snapshot,
             "board_snapshot": board_snapshot,
+            "annotation_ports": annotation_ports,
             "cable_tip_frame": cable_tip_frame,
             "plug_offset": dataset.plug_reference_offset(task, cable_tip_frame),
             **motion.control_for(task),

@@ -76,6 +76,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--dataset-version` | 자동 생성 | `ws_aic/data/img2pos/` 아래 새 version 경로 |
 | `--resume` | 꺼짐 | 기존 version에 명시적으로 이어서 수집 |
 | `--val-ratio`, `--test-ratio` | `0.15`, `0.15` | trial 단위 validation/test 비율 |
+| `--auto-annotate-ports {true,false}` | `false` | 활성 포트의 외곽 bbox와 4-keypoint YOLO-pose annotation 생성 |
 | `--headless`, `--no-headless` | `--headless` | Gazebo GUI 비활성화/활성화; `workers=1`일 때만 `--no-headless`가 적용됨 |
 | `--launch-rviz {true,false}` | `false` | RViz 실행 여부; headless 또는 병렬 실행이면 항상 꺼짐 |
 | `--distrobox` | `aic_eval_physic` | eval container 이름 |
@@ -96,7 +97,7 @@ Cable 회전 잡음은 roll/pitch/yaw 각 축에 독립적으로 더하지 않�
 
 Boolean 옵션 형식은 세 종류입니다. `--headless`만 `--headless`/`--no-headless` 쌍을
 사용합니다. `--color-log`, `--launch-rviz`, `--push-to-hub`, `--record-rosbag`,
-`--randomize-lighting`에는 `true` 또는 `false` 값을 반드시 붙입니다. `--resume`,
+`--randomize-lighting`, `--auto-annotate-ports`에는 `true` 또는 `false` 값을 반드시 붙입니다. `--resume`,
 `--hf-private`, `--cleanup`, `--cleanup-only`, `--dry-run`은 옵션이 있으면 켜지는 flag입니다.
 
 ### 병렬 headless 실행
@@ -300,10 +301,16 @@ ws_aic/data/img2pos/<version>/
 ├── data.yaml
 ├── metadata.jsonl
 ├── samples.jsonl
-└── images/
+├── yolo_pose.yaml                  # auto annotation 활성화 시 생성
+├── labels -> annotations           # Ultralytics 호환 링크
+├── images/
     ├── train/<left|center|right>/trial_<index>/*.jpg
     ├── val/<left|center|right>/trial_<index>/*.jpg
     └── test/<left|center|right>/trial_<index>/*.jpg
+└── annotations/
+    ├── train/<left|center|right>/trial_<index>/*.txt
+    ├── val/<left|center|right>/trial_<index>/*.txt
+    └── test/<left|center|right>/trial_<index>/*.txt
 ```
 
 JPEG 파일명은
@@ -313,6 +320,17 @@ JPEG 파일명은
 `card_00101`로 표시됩니다. 해당 trial에서 SFP rail 4의 port 0을 찍은 첫 center image는
 `images/train/center/trial_000/sfp_card_00101_rail4_port0_num001_center.jpg`로
 저장됩니다. SC도 같은 규칙을 사용하며 `cards10`은 `card_01`로 표시합니다.
+
+`--auto-annotate-ports true`이면 task의 card mask로 실제 생성된 모든 포트를 찾아 각
+camera image와 같은 stem의 TXT를 `annotations/`에 기록합니다. 한 행은
+`class xc yc w h x1 y1 v1 ... x4 y4 v4` 형식이며 모든 좌표는 정규화됩니다. SFP의
+class ID는 `rail×2+port`이고 `yolo_pose.yaml`의 이름은 `SFP_00`부터 `SFP_41`까지입니다.
+예를 들어 0부터 세는 rail 4의 port 1은 class `9`, label `SFP_41`입니다. SC는 class
+`10`, label `sc_port`를 사용합니다. keypoint는 port entrance 로컬 좌표의
+`(-x,+y), (+x,+y), (+x,-y), (-x,-y)` 순서입니다. bbox는 이 네 외곽점의 min/max이며,
+사용 크기는 SFP `16.224×13.698mm`, SC `25.781×9.300mm`입니다. 네 점이 모두 영상 안에
+있는 포트만 한 행으로 기록하고 포트가 없는 camera도 빈 TXT를 남깁니다. 이 판정은
+geometry projection이므로 다른 물체에 의한 실제 가림까지 판정하지는 않습니다.
 
 `metadata.jsonl`은 수집 실행마다 한 row를 추가합니다.
 
@@ -328,6 +346,7 @@ JPEG 파일명은
 | `id` | 동기화 capture 식별자 |
 | `trial_id`, `split` | trial 식별자와 trial 단위 train/val/test 분할 |
 | `images`, `connector` | 항상 `left`, `center`, `right`를 모두 갖는 JPEG 상대 경로 mapping과 connector 구분 |
+| `annotations`, `annotation_labels` | camera별 YOLO-pose TXT 상대 경로와 `SFP_<rail><port>` label 목록 |
 | `collection_policy` | `board-view`, `descent`, `near-port` 수집 구간 |
 | `target_xyz_m` | 공통 촬영 시점 `base_link`의 `port_entrance - plug_reference` correction |
 | `sampling_offset_xyz_m` | 최소 안전거리를 제외한 실제 port-local XYZ; tier 분포 감사용 |

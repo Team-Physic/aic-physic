@@ -74,6 +74,7 @@ CLI_DEFAULTS = {
     "resume": False,
     "val_ratio": 0.15,
     "test_ratio": 0.15,
+    "auto_annotate_ports": False,
     "push_to_hub": False,
     "hf_repo_id": "team-physic/aic-align",
     "hf_revision": "",
