@@ -121,11 +121,11 @@ pixi run --frozen ros2 run aic_model aic_model \
 | --- | --- | --- |
 | `AIC_COLLECT_STEPS` | `1000` | trial당 offset sample 수 |
 | `AIC_RPY_DATASET_VERSION` | 빈 문자열 | 데이터셋 하위 버전 디렉터리 |
-| `AIC_VISION_OFFSET_DATASET_DIR` | `ws_aic/data/phy_rpy_randomization[/<version>]` | 데이터셋 출력 위치 |
+| `AIC_VISION_OFFSET_DATASET_DIR` | `ws_aic/data/img2pos[/<version>]` | 데이터셋 출력 위치 |
 | `AIC_RPY_MIN_VISIBLE_CAMERAS` | `2` | 저장에 필요한 최소 카메라 수 |
 | `AIC_RPY_VISIBILITY_MARGIN_PX` | `64.0` | 영상 경계로부터 필요한 여백 |
 | `AIC_COLLECT_SYNC_TOLERANCE_MS` | `30.0` | camera/controller/TF 허용 시각 차이 |
-| `AIC_RPY_RANDOMIZATION_VAL_RATIO` | `0.3` | validation sample 비율 |
+| `AIC_RPY_RANDOMIZATION_VAL_RATIO` | `0.3` | validation trial 비율 |
 | `AIC_COLLECT_RANDOM_SEED` | 미지정 | offset 샘플링 재현용 seed |
 | `AIC_VISION_OFFSET_PUSH_TO_HUB` | `true` | 수집 완료 후 Hugging Face 업로드 여부 |
 | `AIC_VISION_OFFSET_REPO_ID` | 빈 문자열 | 업로드할 Hugging Face Dataset 저장소 |
@@ -135,22 +135,20 @@ XYZ/RPY 범위는 `AIC_PORT_COLLECT_DX_MIN_MM`처럼
 
 ## 데이터셋 구조
 
-기본 출력은 `ws_aic/data/phy_rpy_randomization/<version>/`에 생성됩니다.
+기본 출력은 `ws_aic/data/img2pos/<version>/`에 생성됩니다.
 
 ```text
-phy_rpy_randomization/<version>/
+img2pos/<version>/
 ├── data.yaml
-├── metadata.jsonl
-├── images/
-│   ├── train/<connector>/<camera>/*.jpg
-│   └── val/<connector>/<camera>/*.jpg
-└── metadata/
-    ├── train/<connector>/<camera>/*.json
-    └── val/<connector>/<camera>/*.json
+├── samples.jsonl
+└── images/
+    ├── train/<camera>/*.jpg
+    └── val/<camera>/*.jpg
 ```
 
-각 metadata에는 command pose, 측정된 plug 위치, 정렬 label, offset sample,
-카메라 가시성 및 source별 ROS timestamp가 기록됩니다.
+`samples.jsonl`은 카메라 이미지 한 장당 한 행이며 이미지 경로, camera/connector,
+`target_xyz_m`, 촬영 시각과 최대 동기화 오차만 기록합니다. 같은 `trial_id`는 항상
+같은 split에 배정되어 train/validation 사이의 trial 누수를 막습니다.
 
 ## 테스트
 

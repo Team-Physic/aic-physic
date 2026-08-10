@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Dataset and label writers for PortOffsetCollect."""
 
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -12,8 +13,8 @@ import numpy as np
 from geometry_msgs.msg import Pose, Transform
 
 
-def _connector_dir_for_task(task) -> str:
-    """저장 경로에 사용할 커넥터 타입 디렉터리 이름을 반환한다."""
+def _connector_for_task(task) -> str:
+    """학습 sample에 기록할 커넥터 타입을 반환한다."""
     for value in (
         getattr(task, "port_type", ""),
         getattr(task, "port_name", ""),
@@ -28,12 +29,52 @@ def _connector_dir_for_task(task) -> str:
     return "UNKNOWN"
 
 
-def _split_for_sample(self, sample_index: int) -> str:
-    """sample index를 설정된 비율에 따라 train 또는 validation으로 나눈다."""
-    if self._rpy_val_ratio <= 0.0:
+def _split_for_trial(self, trial_id: str) -> str:
+    """같은 trial의 모든 sample을 안정적으로 동일한 split에 배정한다."""
+    val_ratio = min(max(float(self._rpy_val_ratio), 0.0), 1.0)
+    if val_ratio <= 0.0:
         return "train"
-    period = max(1, round(1.0 / self._rpy_val_ratio))
-    return "val" if sample_index % period == 0 else "train"
+    if val_ratio >= 1.0:
+        return "val"
+    digest = hashlib.sha256(trial_id.encode("utf-8")).digest()
+    fraction = int.from_bytes(digest[:8], "big") / float(1 << 64)
+    return "val" if fraction < val_ratio else "train"
+
+
+def _trial_id(self, episode_name: str) -> str:
+    """수집 실행 metadata에서 trial 식별자를 만들고 없으면 episode 이름을 사용한다."""
+    run_id = str(self._collection_metadata.get("run_id", "")).strip()
+    trial_index = str(self._collection_metadata.get("trial_index", "")).strip()
+    if run_id and trial_index:
+        return f"{run_id}:{trial_index}"
+    return episode_name
+
+
+def _target_xyz_m(extras: dict[str, Any]) -> list[float] | None:
+    """수집 계산 결과에서 img2pos 학습용 XYZ correction label만 추출한다."""
+    label = extras.get("label")
+    if not isinstance(label, dict):
+        return None
+    try:
+        target = [float(label[name]) for name in ("x_m", "y_m", "z_m")]
+    except (KeyError, TypeError, ValueError):
+        return None
+    return target if all(np.isfinite(value) for value in target) else None
+
+
+def _max_sync_skew_ns(timestamps: dict[str, Any]) -> int:
+    """저장 승인에 사용된 source별 시각 차이 중 최댓값을 반환한다."""
+    values = timestamps.get("skew_ns", {})
+    if not isinstance(values, dict):
+        return 0
+    skews = []
+    for value in values.values():
+        try:
+            skews.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return max(skews, default=0)
+
 
 def _port_projection_for_camera(
     self,
@@ -82,16 +123,6 @@ def _port_projection_for_camera(
         "height": int(img_msg.height),
         "margin_px": margin,
     }
-
-def _scenario_metadata(self, task) -> dict[str, Any]:
-    """현재 task ID에 대응하는 randomization metadata를 읽는다."""
-    try:
-        params = json.loads(
-            self._scenario_params_file.read_text(encoding="utf-8")
-        )
-        return params.get(task.id, {}) or {}
-    except Exception:
-        return {}
 
 def _stamp_ns(stamp) -> int | None:
     """ROS builtin time message를 nanosecond 정수로 변환한다."""
@@ -270,7 +301,7 @@ def _tf_sync_metadata(
     timestamps.pop("rejection_reason", None)
     return True, timestamps
 
-def _save_xyz_rpy_sample(
+def _save_img2pos_sample(
     self,
     episode_name: str,
     task,
@@ -283,7 +314,7 @@ def _save_xyz_rpy_sample(
     extras: dict[str, Any],
     detections_by_camera: Optional[dict[str, Optional[dict[str, Any]]]],
 ) -> tuple[bool, str]:
-    """수집 시각 일치 조건을 통과한 영상과 label을 저장하고 결과 이유를 반환한다."""
+    """승인된 영상을 compact img2pos sample과 함께 저장하고 결과를 반환한다."""
     if obs is None:
         return False, "Observation을 받지 못함"
 
@@ -294,7 +325,16 @@ def _save_xyz_rpy_sample(
             "수집 시각 일치 검사 실패: "
             f"{timestamps.get('rejection_reason', 'unknown reason')}",
         )
-    timestamps["dataset_write_stamp_ns"] = int(self.get_clock().now().nanoseconds)
+    try:
+        capture_stamp_ns = int(timestamps.get("capture_stamp_ns", 0))
+    except (TypeError, ValueError):
+        capture_stamp_ns = 0
+    if capture_stamp_ns <= 0:
+        return False, "유효한 camera capture timestamp가 없음"
+
+    target_xyz_m = _target_xyz_m(extras)
+    if target_xyz_m is None:
+        return False, "유효한 XYZ correction label이 없음"
 
     projections = {
         camera_name: self._port_projection_for_camera(obs, camera_name, port_tf)
@@ -312,11 +352,11 @@ def _save_xyz_rpy_sample(
             f"visible={visible_cameras}, required={self._rpy_min_visible_cameras}",
         )
 
-    sample_index = self._rpy_sample_count
-    split = self._split_for_sample(sample_index)
-    connector_dir = _connector_dir_for_task(task)
-    sample_id = f"{episode_name}_{phase}_{step_idx:06d}"
-    image_records = {}
+    trial_id = self._trial_id(episode_name)
+    split = self._split_for_trial(trial_id)
+    connector = _connector_for_task(task)
+    capture_id = f"{episode_name}_{phase}_{step_idx:06d}"
+    sample_records: list[dict[str, Any]] = []
     written_paths: list[Path] = []
     write_failures: list[str] = []
 
@@ -329,146 +369,59 @@ def _save_xyz_rpy_sample(
             write_failures.append(f"{camera_name}: image 변환 실패")
             continue
 
-        stem = f"{sample_id}_{camera_name}"
+        sample_id = f"{capture_id}_{camera_name}"
         image_path = (
             self._rpy_dataset_dir
             / "images"
             / split
-            / connector_dir
             / camera_name
-            / f"{stem}.jpg"
-        )
-        metadata_path = (
-            self._rpy_dataset_dir
-            / "metadata"
-            / split
-            / connector_dir
-            / camera_name
-            / f"{stem}.json"
+            / f"{sample_id}.jpg"
         )
         image_path.parent.mkdir(parents=True, exist_ok=True)
-        metadata_path.parent.mkdir(parents=True, exist_ok=True)
 
         if not cv2.imwrite(str(image_path), bgr):
             write_failures.append(f"{camera_name}: JPEG 저장 실패 ({image_path})")
             continue
         written_paths.append(image_path)
-
-        label_record = {
-            "sample_id": sample_id,
-            "collection": dict(self._collection_metadata),
-            "camera": camera_name,
-            "connector": connector_dir,
+        sample_records.append({
+            "id": sample_id,
+            "capture_id": capture_id,
+            "trial_id": trial_id,
+            "split": split,
             "image": str(image_path.relative_to(self._rpy_dataset_dir)),
-            "task": {
-                "id": task.id,
-                "port_type": task.port_type,
-                "port_name": task.port_name,
-                "target_module_name": task.target_module_name,
-                "cable_name": task.cable_name,
-                "plug_name": task.plug_name,
-            },
-            "scenario": self._scenario_metadata(task),
-            "plug_reference": dict(extras.get("plug_reference", {})),
-            "command": {
-                "position": {
-                    "x": float(pose.position.x),
-                    "y": float(pose.position.y),
-                    "z": float(pose.position.z),
-                },
-                "orientation_xyzw": {
-                    "x": float(pose.orientation.x),
-                    "y": float(pose.orientation.y),
-                    "z": float(pose.orientation.z),
-                    "w": float(pose.orientation.w),
-                },
-            },
-            "location": {
-                "x_m": float(extras.get("location", {}).get("x_m", 0.0)),
-                "y_m": float(extras.get("location", {}).get("y_m", 0.0)),
-                "z_m": float(extras.get("location", {}).get("z_m", 0.0)),
-                "roll_rad": float(extras.get("location", {}).get("roll_rad", 0.0)),
-                "pitch_rad": float(extras.get("location", {}).get("pitch_rad", 0.0)),
-                "yaw_rad": float(extras.get("location", {}).get("yaw_rad", 0.0)),
-            },
-            "label": {
-                "x_m": float(extras.get("label", {}).get("x_m", 0.0)),
-                "y_m": float(extras.get("label", {}).get("y_m", 0.0)),
-                "z_m": float(extras.get("label", {}).get("z_m", 0.0)),
-                "roll_rad": float(extras.get("label", {}).get("roll_rad", 0.0)),
-                "pitch_rad": float(extras.get("label", {}).get("pitch_rad", 0.0)),
-                "yaw_rad": float(extras.get("label", {}).get("yaw_rad", 0.0)),
-            },
-            "collect": {
-                "pattern": str(extras.get("collect_pattern", self.collect_pattern)),
-                "local_x_m": float(extras.get("collect_local_x", 0.0)),
-                "local_y_m": float(extras.get("collect_local_y", 0.0)),
-                "local_z_m": float(extras.get("collect_local_z", 0.0)),
-                "local_roll_rad": float(extras.get("collect_local_roll", 0.0)),
-                "local_pitch_rad": float(extras.get("collect_local_pitch", 0.0)),
-                "local_yaw_rad": float(extras.get("collect_local_yaw", 0.0)),
-                "local_roll_deg": float(extras.get("collect_local_roll_deg", 0.0)),
-                "local_pitch_deg": float(extras.get("collect_local_pitch_deg", 0.0)),
-                "local_yaw_deg": float(extras.get("collect_local_yaw_deg", 0.0)),
-                "distance_m": float(
-                    extras.get("collect_distance", extras.get("collect_radius", 0.0))
-                ),
-            },
-            "visibility": {
-                "camera": projections[camera_name],
-                "visible_cameras": visible_cameras,
-            },
-            "timestamps": timestamps,
-        }
-        try:
-            metadata_path.write_text(
-                json.dumps(self._json_safe(label_record), ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            image_path.unlink(missing_ok=True)
-            written_paths.remove(image_path)
-            write_failures.append(f"{camera_name}: metadata 저장 실패 ({exc})")
-            continue
-        written_paths.append(metadata_path)
-        image_records[camera_name] = str(image_path.relative_to(self._rpy_dataset_dir))
+            "camera": camera_name,
+            "connector": connector,
+            "target_xyz_m": target_xyz_m,
+            "capture_stamp_ns": capture_stamp_ns,
+            "max_sync_skew_ns": _max_sync_skew_ns(timestamps),
+        })
 
-    if len(image_records) < self._rpy_min_visible_cameras:
+    if len(sample_records) < self._rpy_min_visible_cameras:
         for path in written_paths:
             path.unlink(missing_ok=True)
         return (
             False,
             "필요한 camera 파일 수를 저장하지 못함: "
-            f"written={list(image_records)}, required={self._rpy_min_visible_cameras}, "
+            f"written={[record['camera'] for record in sample_records]}, "
+            f"required={self._rpy_min_visible_cameras}, "
             f"details={write_failures}",
         )
 
-    metadata = {
-            "sample_id": sample_id,
-            "collection": dict(self._collection_metadata),
-            "split": split,
-            "connector": connector_dir,
-            "phase": phase,
-            "step_index": int(step_idx),
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "images": image_records,
-            "metadata_dir": f"metadata/{split}/{connector_dir}",
-            "image_layout": "images/<split>/<connector>/<camera>",
-            "metadata_layout": "metadata/<split>/<connector>/<camera>",
-            "visible_cameras": visible_cameras,
-            "timestamps": timestamps,
-        }
     try:
-        with self._rpy_metadata_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(self._json_safe(metadata), ensure_ascii=False) + "\n")
+        with self._img2pos_samples_path.open("a", encoding="utf-8") as f:
+            f.write("".join(
+                json.dumps(record, ensure_ascii=False) + "\n"
+                for record in sample_records
+            ))
     except OSError as exc:
         for path in written_paths:
             path.unlink(missing_ok=True)
-        return False, f"metadata.jsonl 저장 실패: {exc}"
+        return False, f"samples.jsonl 저장 실패: {exc}"
     self._rpy_sample_count += 1
     return (
         True,
-        f"sample_id={sample_id}, cameras={sorted(image_records)}, "
+        f"capture_id={capture_id}, "
+        f"cameras={sorted(record['camera'] for record in sample_records)}, "
         f"saved_count={self._rpy_sample_count}",
     )
 
@@ -485,8 +438,8 @@ def _save_vision_offset_sample(
     extras: dict[str, Any],
     detections_by_camera: Optional[dict[str, Optional[dict[str, Any]]]] = None,
 ) -> tuple[bool, str]:
-    """기존 vision-offset 저장 API를 XYZ/RPY sample 저장기로 연결한다."""
-    return self._save_xyz_rpy_sample(
+    """기존 vision-offset 저장 API를 compact img2pos 저장기로 연결한다."""
+    return self._save_img2pos_sample(
         episode_name,
         task,
         phase,

@@ -21,6 +21,7 @@ EXPECTED_METHOD_MODULES = {
     "_finish_data_collection_episode": "data_generator.port_offset_episode",
     "_observation_sync_metadata": "data_generator.port_offset_dataset",
     "_wait_for_synchronized_observation": "data_generator.port_offset_dataset",
+    "_save_img2pos_sample": "data_generator.port_offset_dataset",
     "_stage_collect": "data_generator.port_offset_stage_motion",
     "insert_cable": "data_generator.port_offset_stage_episode",
 }

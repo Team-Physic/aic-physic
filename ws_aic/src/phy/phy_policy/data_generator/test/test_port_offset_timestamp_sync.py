@@ -1,15 +1,20 @@
 """PortOffsetCollect 수집 시각 일치 조건의 회귀 테스트."""
 
+import json
 from types import SimpleNamespace
 
+import numpy as np
 from builtin_interfaces.msg import Time as TimeMessage
 
 from data_generator.port_offset_dataset import (
     _observation_sync_metadata,
-    _save_xyz_rpy_sample,
+    _save_img2pos_sample,
+    _split_for_trial,
     _tf_sync_metadata,
+    _trial_id,
     _wait_for_synchronized_observation,
 )
+from data_generator.port_offset_manifest import _write_img2pos_data_yaml
 from data_generator.port_offset_runtime import (
     _collect_log_text,
     _lookup_transform_at,
@@ -251,7 +256,7 @@ def test_capture_failure_reason_explains_camera_time_difference() -> None:
 
 def test_save_result_explains_missing_observation() -> None:
     """저장 실패는 bool뿐 아니라 사용자가 확인할 이유도 반환한다."""
-    saved, reason = _save_xyz_rpy_sample(
+    saved, reason = _save_img2pos_sample(
         SimpleNamespace(),
         "episode",
         None,
@@ -267,6 +272,109 @@ def test_save_result_explains_missing_observation() -> None:
 
     assert saved is False
     assert reason == "Observation을 받지 못함"
+
+
+def test_trial_split_is_stable_for_every_sample_in_a_trial() -> None:
+    """같은 trial ID는 sample 순서와 무관하게 항상 같은 split을 사용한다."""
+    policy = SimpleNamespace(_rpy_val_ratio=0.3)
+
+    first = _split_for_trial(policy, "run-001:4")
+    second = _split_for_trial(policy, "run-001:4")
+
+    assert first in {"train", "val"}
+    assert second == first
+    assert _split_for_trial(SimpleNamespace(_rpy_val_ratio=0.0), "trial") == "train"
+    assert _split_for_trial(SimpleNamespace(_rpy_val_ratio=1.0), "trial") == "val"
+
+
+def test_img2pos_writer_saves_only_compact_training_records(tmp_path) -> None:
+    """승인된 camera마다 JPEG와 최소 img2pos JSONL row만 저장한다."""
+    images = {
+        name: SimpleNamespace(width=8, height=8)
+        for name in ("left", "center", "right")
+    }
+    policy = SimpleNamespace(
+        _rpy_dataset_dir=tmp_path,
+        _img2pos_samples_path=tmp_path / "samples.jsonl",
+        _collection_metadata={"run_id": "run-001", "trial_index": "4"},
+        _rpy_val_ratio=0.3,
+        _rpy_min_visible_cameras=2,
+        _rpy_sample_count=0,
+        _image_msg_for_camera=lambda _obs, name: images[name],
+        _image_msg_to_bgr=lambda _image, _name: np.zeros((8, 8, 3), dtype=np.uint8),
+        _port_projection_for_camera=lambda _obs, _name, _tf: {"visible": True},
+    )
+    policy._trial_id = lambda episode: _trial_id(policy, episode)
+    policy._split_for_trial = lambda trial: _split_for_trial(policy, trial)
+    timestamps = {
+        "sync_valid": True,
+        "capture_stamp_ns": 1_010_000_000,
+        "skew_ns": {"camera": 20_000_000, "controller": 15_000_000, "tf": 5_000_000},
+    }
+
+    saved, reason = _save_img2pos_sample(
+        policy,
+        "episode-001",
+        SimpleNamespace(port_type="sfp"),
+        "collect",
+        7,
+        SimpleNamespace(),
+        None,
+        None,
+        None,
+        {
+            "timestamps": timestamps,
+            "label": {"x_m": -0.003, "y_m": 0.022, "z_m": -0.054},
+        },
+        None,
+    )
+
+    assert saved is True, reason
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "samples.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(records) == 3
+    assert {record["camera"] for record in records} == {"left", "center", "right"}
+    assert {record["trial_id"] for record in records} == {"run-001:4"}
+    assert len({record["split"] for record in records}) == 1
+    assert all(record["target_xyz_m"] == [-0.003, 0.022, -0.054] for record in records)
+    assert all(record["capture_stamp_ns"] == 1_010_000_000 for record in records)
+    assert all(record["max_sync_skew_ns"] == 20_000_000 for record in records)
+    assert set(records[0]) == {
+        "id",
+        "capture_id",
+        "trial_id",
+        "split",
+        "image",
+        "camera",
+        "connector",
+        "target_xyz_m",
+        "capture_stamp_ns",
+        "max_sync_skew_ns",
+    }
+    assert all((tmp_path / record["image"]).is_file() for record in records)
+    assert not (tmp_path / "metadata").exists()
+
+
+def test_img2pos_manifest_describes_the_compact_schema(tmp_path) -> None:
+    """manifest는 공통 target 정의와 trial split만 한 번 기록한다."""
+    policy = SimpleNamespace(
+        _rpy_dataset_dir=tmp_path,
+        _rpy_dataset_version="v1",
+        _rpy_val_ratio=0.3,
+    )
+
+    _write_img2pos_data_yaml(policy)
+
+    manifest = (tmp_path / "data.yaml").read_text(encoding="utf-8")
+    assert "task: img2pos" in manifest
+    assert "samples: samples.jsonl" in manifest
+    assert "image_layout: images/<split>/<camera>/*.jpg" in manifest
+    assert "definition: port_entrance - plug_reference" in manifest
+    assert "group_by: trial_id" in manifest
+    assert "metadata" not in manifest
+    assert "command" not in manifest
 
 
 def test_lookup_transform_at_uses_requested_camera_timestamp() -> None:

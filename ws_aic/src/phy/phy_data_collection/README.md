@@ -109,9 +109,9 @@ common-FOV 조건은 triangulation에만 적용되는 것이 아니다. 다만 �
 |---|---|---|
 | `ais_triangulation/run_triangulation_cases.py | generate_cases()` | simulator 실행 전 YAML 생성 | fixed home 기준 common-FOV를 통과한 candidate만 trial로 채택 |
 | `phy/phy_policy/data_generator/data_generator/port_offset_dataset.py | _port_projection_for_camera()` | PortOffset sample capture 시점 | 실제 ControllerState camera pose, CameraInfo와 port TF로 camera별 pixel·depth 계산 |
-| `phy/phy_policy/data_generator/data_generator/port_offset_dataset.py | _save_xyz_rpy_sample()` | JPEG·metadata 쓰기 직전 | 기본 64 px margin 안에 port가 보이는 camera가 두 개 이상일 때만 sample 저장 |
+| `phy/phy_policy/data_generator/data_generator/port_offset_dataset.py | _save_img2pos_sample()` | JPEG·sample row 쓰기 직전 | 기본 64 px margin 안에 port가 보이는 camera가 두 개 이상일 때만 sample 저장 |
 
-PortOffset sample이 visibility 또는 timestamp 조건을 통과하지 못하면 JPEG, camera metadata JSON과 `metadata.jsonl`을 쓰지 않으며 저장 count도 증가시키지 않는다. 일부 camera 파일을 쓴 뒤 최소 camera 수를 충족하지 못한 경우 생성된 부분 파일도 삭제한다.
+PortOffset sample이 visibility 또는 timestamp 조건을 통과하지 못하면 JPEG와 `samples.jsonl` row를 쓰지 않으며 저장 count도 증가시키지 않는다. 일부 camera 파일을 쓴 뒤 최소 camera 수를 충족하지 못한 경우 생성된 부분 파일도 삭제한다.
 
 이 검사는 실제 capture 시점의 기하학적 port 중심 가시성을 보장한다. Mesh 가림, 조명, lens distortion과 YOLO confidence 통과까지 보장하지는 않는다. `--min-visible-cameras` 또는 `--visibility-margin-px`를 명시하면 기본 승인 조건을 override한다.
 
@@ -196,9 +196,9 @@ trial 시작:
   dynamic plug TF time_difference <= sync_tolerance
 ```
 
-timeout이나 허용 오차를 넘긴 sample은 JPEG, 카메라별 sample metadata JSON 및 `metadata.jsonl`을 쓰지 않고 저장 count도 증가시키지 않습니다.
+timeout이나 허용 오차를 넘긴 sample은 JPEG와 `samples.jsonl` row를 쓰지 않고 저장 count도 증가시키지 않습니다.
 
-카메라별 sample metadata JSON과 `metadata.jsonl`의 `timestamps`에는 `command_stamp_ns`, `capture_stamp_ns`, `command_to_capture_ns`, camera별 stamp, `controller_stamp_ns`, port/plug TF stamp, `is_static_snapshot`, `skew_ns`, `wait_ns`, `sync_tolerance_ns`, `sync_valid`, `dataset_write_stamp_ns`가 기록되며 모든 시각 값의 단위는 `ns`입니다. `command_to_capture_ns`는 명령 발행부터 저장 대상으로 선택된 center camera frame까지의 간격이며, 로봇이 목표에 도달한 시간 자체를 뜻하지는 않습니다. 호환성을 위해 유지하는 `skew_ns`는 source 사이의 최대 시각 차이를 `ns` 단위로 저장하는 필드입니다.
+상세 source timestamp와 TF는 저장 승인 과정에서만 사용하고 원본 rosbag에 보관합니다. 학습용 `samples.jsonl`에는 center image의 `capture_stamp_ns`와 camera/controller/plug TF 차이 중 최댓값인 `max_sync_skew_ns`만 남깁니다. 모든 시각 값의 단위는 `ns`입니다.
 
 | 함수 | 현재 역할 |
 |---|---|
@@ -208,41 +208,27 @@ timeout이나 허용 오차를 넘긴 sample은 JPEG, 카메라별 sample metada
 | `_wait_for_synchronized_observation()` | timeout 동안 현재 명령보다 새로운 Image/ControllerState 중 시각 조건을 만족하는 Observation을 선택합니다. |
 | `_lookup_transform_at()` / `_tf_sync_metadata()` | 메인 TF2 buffer에서 center image 시각의 동적 plug TF를 한 번 조회하고 port snapshot과 함께 metadata를 검증합니다. |
 | `_stage_collect()` | 정지 속도 판정 없이 수집 시각 일치 조건을 통과한 sample만 저장기로 전달합니다. |
-| `_save_xyz_rpy_sample()` | 이미지·label·timestamp metadata가 모두 기록된 뒤에만 count를 증가시키고 성공 여부와 이유를 반환합니다. |
+| `_save_img2pos_sample()` | 이미지와 compact img2pos row가 모두 기록된 뒤에만 count를 증가시키고 성공 여부와 이유를 반환합니다. |
 
 저장 시도 결과는 색상과 이유를 함께 출력합니다.
 
 | 로그 | 색상 | 의미 |
 |---|---|---|
-| `CAPTURE SAVED` | 초록색 bold | JPEG와 metadata가 실제로 기록되고 저장 count가 증가함 |
+| `CAPTURE SAVED` | 초록색 bold | JPEG와 `samples.jsonl` row가 실제로 기록되고 저장 count가 증가함 |
 | `CAPTURE FAILED` | 빨간색 bold | 시각 차이 초과, TF 조회 실패, visibility 부족 또는 파일 저장 실패로 sample이 저장되지 않음 |
 
-시각 관련 실패 로그에는 camera/controller/plug TF의 실제 시각 차이와 허용 범위를 `ms` 단위로 표시합니다. 파일 저장 도중 실패하면 해당 시도에서 생성한 부분 JPEG와 metadata JSON을 삭제합니다.
+시각 관련 실패 로그에는 camera/controller/plug TF의 실제 시각 차이와 허용 범위를 `ms` 단위로 표시합니다. 파일 저장 도중 실패하면 해당 시도에서 생성한 부분 JPEG를 삭제합니다.
 
-### 1-4. Offline sample 일치 검사
+### 1-4. 원본 이벤트 보관과 검사
 
-`validate_portoffset_trial.py`는 같은 trial의 dataset과 MCAP을 직접 읽어 모든 저장 sample을 자동 검사합니다.
+Compact img2pos 데이터셋은 학습에 불필요한 전체 source timestamp, TF, command pose를
+중복 저장하지 않습니다. 수집기는 저장 전에 camera·ControllerState·plug TF의 시각 조건과
+가시성을 검사하며, 상세 이벤트를 다시 검증해야 할 때는 trial별 MCAP을 원본으로 사용합니다.
 
-```bash
-pixi run ros2 run phy_data_collection validate_portoffset_trial \
-  --dataset-dir "$(git rev-parse --show-toplevel)/ws_aic/data/phy_portoffset_randomization/0726-001" \
-  --rosbag "$(git rev-parse --show-toplevel)/rosbags/portoffset/0726-001/<run-id>/<trial-dir>"
-```
-
-| 검사 항목 | 합격 조건 | 단위 |
-|---|---|---|
-| 저장 JPEG | 동일 camera와 `header.stamp`의 MCAP Image를 수집기와 같은 방식으로 JPEG encoding한 결과와 일치 | `byte` |
-| 세 camera 시각 | `max(left, center, right) - min(left, center, right) <= sync_tolerance` | `ns`, 보고서에 `ms` 병기 |
-| ControllerState 시각 | `abs(controller - center_image) <= sync_tolerance` | `ns`, 보고서에 `ms` 병기 |
-| port entrance | trial 시작 snapshot과 capture 시각의 위치 차이 `0.1 mm`, 회전 차이 `0.001 rad` 이하 | `mm`, `rad` |
-| plug reference | capture 시각의 TF가 존재하고 기록된 transform과 위치 차이 `0.1 mm`, 회전 차이 `0.001 rad` 이하 | `mm`, `rad` |
-| `location`, `label` | MCAP port/plug TF와 plug local offset으로 재계산한 값의 위치 차이 `0.1 mm`, 회전 차이 `0.001 rad` 이하 | `mm`, `rad` |
-
-결과는 기본적으로 trial rosbag 디렉터리의 `portoffset_validation.json`에 기록되며, 전체 sample이 합격하면 exit code `0`, 불합격 sample이 있으면 `1`, 입력 또는 실행 오류는 `2`를 반환합니다. 보고서에는 sample별 `PASS/FAIL`, camera/controller/plug TF 시각 차이, TF와 label 오차 및 실패 원인이 포함됩니다.
-
-새로 수집한 metadata는 `collection.run_id`, `collection.trial_index`, `collection.rosbag_path`로 MCAP을 정확히 연결합니다. 기존 metadata에는 이 값이 없으므로 `--sample-id <id>`를 명시해 검사합니다.
-
-MCAP topic 자체가 없으면 `pixi run ros2 bag info <trial-dir>`로 message count를 확인하고 collector와 recorder가 동일한 `rmw_zenoh_cpp`/Zenoh router를 사용하는지 확인합니다.
+기존 `validate_portoffset_trial.py`는 per-image metadata JSON을 사용하는 이전 데이터셋 전용입니다.
+새 `samples.jsonl` 포맷에는 적용되지 않습니다. MCAP topic이 없으면
+`pixi run ros2 bag info <trial-dir>`로 message count를 확인하고 collector와 recorder가 동일한
+`rmw_zenoh_cpp`/Zenoh router를 사용하는지 확인합니다.
 
 ### 1-5. Hugging Face에 업로드되는 데이터 포맷
 
@@ -251,30 +237,29 @@ MCAP topic 자체가 없으면 `pixi run ros2 bag info <trial-dir>`로 message c
 ```text
 <dataset-version>/
 ├── data.yaml
-├── metadata.jsonl
-├── images/<train|val>/<SFP|SC>/<left|center|right>/*.jpg
-└── metadata/<train|val>/<SFP|SC>/<left|center|right>/*.json
+├── samples.jsonl
+└── images/<train|val>/<left|center|right>/*.jpg
 ```
 
-포트가 보이는 카메라마다 JPEG 한 장과 같은 이름의 sample metadata JSON 한 개를 저장합니다. 예를 들어 `..._center.jpg`의 label·timestamp 정보는 `..._center.json`에 있습니다. 기본값에서는 64 px margin 안쪽에 포트가 보이는 camera가 두 개 이상일 때만 sample을 저장하며, 반드시 세 camera가 모두 저장되는 것은 아닙니다.
+포트가 보이는 카메라마다 JPEG 한 장과 `samples.jsonl` 행 하나를 저장합니다. 기본값에서는
+64 px margin 안쪽에 포트가 보이는 camera가 두 개 이상일 때만 capture를 저장하며, 반드시
+세 camera가 모두 저장되는 것은 아닙니다. 같은 capture의 camera 행은 같은 XYZ label을 공유합니다.
 
-각 카메라별 sample metadata JSON의 핵심 필드는 다음과 같습니다.
+각 `samples.jsonl` 행의 전체 필드는 다음과 같습니다.
 
-| 필드 | 의미 | 좌표 기준 | 값 단위 |
-|---|---|---|---|
-| `image`, `camera`, `connector` | JPEG 상대 경로와 camera/connector 구분 | dataset 경로 | 문자열 |
-| `collection` | 정확한 trial의 `run_id`, `trial_index`, `rosbag_path` | 수집 실행 | 문자열, index |
-| `task`, `scenario` | task ID와 board/cable/lighting randomization | world/scenario 설정 | 각 하위 필드에 명시 |
-| `command` | 해당 step에서 명령한 TCP pose | `base_link` | 위치 `m`, 회전 quaternion |
-| `plug_reference` | cable TF 원점에서 실제 plug 기준점까지의 local offset | 선택된 plug frame | `m` |
-| `collect.local_*` | 의도적으로 가한 XYZ/RPY sample | port-local 축 | 위치 `m`, 회전 `rad`/`deg` |
-| `location` | 실제 `plug_reference - port_entrance` 위치와 `R_plug R_port^T` 회전 | `base_link` | 위치 `m`, 회전 `rad` |
-| `label` | 정렬 correction인 `port_entrance - plug_reference` 위치와 `R_port R_plug^T` 회전 | `base_link` | 위치 `m`, 회전 `rad` |
-| `visibility` | port projection, depth, image 크기와 visible camera 목록 | camera별 | pixel `px`, depth `m` |
-| `timestamps` | source 시각, 최대 시각 차이, 대기시간과 저장 승인 결과 | ROS time | `ns` |
-| `timestamps.tf.*.transform` | 저장에 사용한 port/plug transform | `base_link` | 위치 `m`, 회전 quaternion |
+| 필드 | 의미 | 단위 |
+|---|---|---|
+| `id`, `capture_id` | camera sample과 공통 capture 식별자 | 문자열 |
+| `trial_id`, `split` | `run_id:trial_index`와 trial 단위 train/val 배정 | 문자열 |
+| `image`, `camera`, `connector` | JPEG 상대 경로와 camera/connector 구분 | 문자열 |
+| `target_xyz_m` | `base_link`에서 `port_entrance - plug_reference` correction | `m` |
+| `capture_stamp_ns` | center image 촬영 시각 | ROS time `ns` |
+| `max_sync_skew_ns` | 승인에 사용한 camera/controller/plug TF 시각 차이의 최댓값 | `ns` |
 
-`location`과 `label`은 독립적인 두 offset이 아니라 동일한 plug-port 관계의 정방향 상태와 역방향 correction입니다. raw port/plug TF message 전체는 dataset에 넣지 않지만 저장 계산에 사용한 frame과 transform은 metadata에 기록하고, 원본 message는 trial MCAP에 보관합니다.
+`data.yaml`은 위 schema, target 정의와 camera 목록을 한 번만 기록합니다. command pose,
+RPY, scenario, projection, 전체 TF와 source별 timestamp는 img2pos 학습 입력·정답이 아니므로
+dataset에서 제외하며, 필요할 경우 원본 trial MCAP에서 확인합니다. `trial_id` 해시로 split을
+결정하므로 동일 trial의 camera와 capture가 train과 validation에 섞이지 않습니다.
 
 ---
 

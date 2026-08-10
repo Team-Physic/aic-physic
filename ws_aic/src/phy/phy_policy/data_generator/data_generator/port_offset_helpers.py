@@ -88,7 +88,7 @@ def _env_deg_range(
     return low, high
 
 def _default_dataset_dir() -> Path:
-    """dataset version을 반영한 기본 RPY 데이터셋 경로를 반환한다."""
-    base_dir = Path(__file__).resolve().parents[5] / "data" / "phy_rpy_randomization"
+    """dataset version을 반영한 기본 img2pos 데이터셋 경로를 반환한다."""
+    base_dir = Path(__file__).resolve().parents[5] / "data" / "img2pos"
     version = os.environ.get("AIC_RPY_DATASET_VERSION", "").strip()
     return base_dir / version if version else base_dir

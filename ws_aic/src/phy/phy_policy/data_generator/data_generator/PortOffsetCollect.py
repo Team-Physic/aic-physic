@@ -59,16 +59,16 @@ class PortOffsetCollect(Policy):
     insert_cable = stages.insert_cable
 
     # Methods implemented in port_offset_manifest.py
-    _write_rpy_data_yaml = manifest._write_rpy_data_yaml
+    _write_img2pos_data_yaml = manifest._write_img2pos_data_yaml
 
     # Methods implemented in port_offset_dataset.py
-    _split_for_sample = dataset._split_for_sample
+    _split_for_trial = dataset._split_for_trial
+    _trial_id = dataset._trial_id
     _port_projection_for_camera = dataset._port_projection_for_camera
-    _scenario_metadata = dataset._scenario_metadata
     _observation_sync_metadata = dataset._observation_sync_metadata
     _wait_for_synchronized_observation = dataset._wait_for_synchronized_observation
     _tf_sync_metadata = dataset._tf_sync_metadata
-    _save_xyz_rpy_sample = dataset._save_xyz_rpy_sample
+    _save_img2pos_sample = dataset._save_img2pos_sample
     _save_vision_offset_sample = dataset._save_vision_offset_sample
 
     # Methods implemented in port_offset_sampling.py
@@ -89,11 +89,10 @@ class PortOffsetCollect(Policy):
         runtime.init_runtime(self, parent_node)
         self._rpy_dataset_dir = dataset_dir
         self._rpy_dataset_version = os.environ.get("AIC_RPY_DATASET_VERSION", "").strip()
-        self._rpy_metadata_path = self._rpy_dataset_dir / "metadata.jsonl"
+        self._img2pos_samples_path = self._rpy_dataset_dir / "samples.jsonl"
         self._collection_metadata = {
             "run_id": os.environ.get("AIC_PORTOFFSET_RUN_ID", "").strip(),
             "trial_index": os.environ.get("AIC_PORTOFFSET_TRIAL_INDEX", "").strip(),
-            "rosbag_path": os.environ.get("AIC_PORTOFFSET_ROSBAG_PATH", "").strip(),
         }
         self._rpy_push_to_hub = _env_bool("AIC_VISION_OFFSET_PUSH_TO_HUB", True)
         self._rpy_hf_repo_id = os.environ.get("AIC_VISION_OFFSET_REPO_ID", "").strip()
@@ -169,7 +168,7 @@ class PortOffsetCollect(Policy):
         self.port_collect_rpy_norm_max_rad = max(
             0.0, float(os.environ.get("AIC_PORT_COLLECT_RPY_NORM_MAX_RAD", "0.0"))
         )
-        self._write_rpy_data_yaml()
+        self._write_img2pos_data_yaml()
         self._port_collect_samples = self._build_port_collect_samples(
             max(1, self.collect_steps)
         )
