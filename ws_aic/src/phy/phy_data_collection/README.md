@@ -15,14 +15,13 @@ cd ws_aic/src
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
   --collection-policy near-port \
-  --sfp-trials 31 \
-  --sc-trials 3 \
+  --port-type sfp \
+  --trials 34 \
   --workers 2 \
   --samples-per-trial 40 \
   --dataset-version img2pos-v1 \
   --push-to-hub false \
-  --record-rosbag false \
-  --seed 42
+  --record-rosbag false
 ```
 
 처음 실행하거나 source를 수정한 뒤에는 로컬 ROS package를 다시 설치합니다.
@@ -64,15 +63,14 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 
 | 옵션 | 기본값 | 설명 |
 | --- | ---: | --- |
-| `--sfp-trials` | `31` | SFP trial 수; local index를 5-bit card 조합 `00001`부터 순서대로 배정 |
-| `--sc-trials` | `3` | SC trial 수; local index를 2-bit card 조합 `01`부터 순서대로 배정 |
+| `--port-type` | 필수 | 모든 trial에서 사용할 connector: `sfp` 또는 `sc` |
+| `--trials` | `34` | 실행할 전체 trial 수 |
 | `--workers` | `1` | 동시에 실행할 격리 simulator 수 |
 | `--samples-per-trial` | `40` | trial마다 저장할 capture 수 |
 | `--collection-policy` | `near-port` | `board-view`, `descent`, `near-port` 중 선택 |
 | `--dataset-version` | 자동 생성 | `ws_aic/data/img2pos/` 아래 새 version 경로 |
 | `--resume` | 꺼짐 | 기존 version에 명시적으로 이어서 수집 |
 | `--val-ratio`, `--test-ratio` | `0.15`, `0.15` | trial 단위 validation/test 비율 |
-| `--seed` | `30` | scenario randomization seed |
 | `--headless` | 켜짐 | Gazebo GUI 비활성화; `--no-headless`로 해제 |
 | `--launch-rviz` | `false` | RViz 실행 여부 |
 | `--distrobox` | `aic_eval_physic` | eval container 이름 |
@@ -85,15 +83,15 @@ dataset version을 생략하면 실행 시각으로 새 이름을 만들고, 기
 
 각 worker는 고유 `ROS_DOMAIN_ID`, Zenoh router TCP port, Gazebo partition을 사용합니다.
 trial index는 worker에 round-robin으로 분배되며 JSONL append는 file lock으로 보호합니다.
-connector와 card 조합은 worker 번호가 아니라 global trial index로 결정되므로 worker 수를
-바꿔도 같은 index에는 같은 조합이 배정됩니다. 한 trial이 실패해도 worker는 남은 index를
-계속 실행하며, 전체 종료 코드는 실패를 유지합니다.
+실행마다 master seed가 자동 생성되며, 각 global trial은 서로 다른 RNG로 card 조합,
+Task Board pose와 조명을 독립 추출합니다. connector는 `--port-type`으로 고정합니다. 한
+trial이 실패해도 worker는 남은 index를 계속 실행하며, 전체 종료 코드는 실패를 유지합니다.
 기본 격리 값은 `ROS_DOMAIN_ID=40+worker`, Zenoh `7600+worker`입니다.
 
 ```bash
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
-  --sfp-trials 31 --sc-trials 3 --workers 2 --samples-per-trial 40 \
+  --port-type sfp --trials 34 --workers 2 --samples-per-trial 40 \
   --dataset-version img2pos-v1
 ```
 
@@ -110,20 +108,18 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `descent` | 선택 포트를 향해 550mm부터 20mm 안전거리까지 먼 순서로 내려오며 거리·횡방향 위치·각도를 무작위화 |
 | `near-port` | 기존 20mm 안전거리 기준 50/10/5/2mm coarse/near tier를 수집 |
 
-공식 AIC task board에는 NIC rail 5개와 SC rail 2개가 있습니다. bit의 오른쪽부터 rail
-0, 1, ...에 대응하며 `0`은 card 없음, `1`은 card 생성을 뜻합니다. 빈 board 조합은
-제외합니다.
+`--port-type sfp`면 각 trial이 31개 non-empty 5-bit card 조합에서 하나를 uniform
+추출합니다. `--port-type sc`면 3개 non-empty 2-bit 조합에서 하나를 uniform 추출합니다.
+bit의 오른쪽부터 rail 0, 1, ...에 대응하며 `0`은 card 없음, `1`은 card 생성을 뜻합니다.
+target rail도 추출된 조합의 활성 rail 중에서 uniform 선택합니다.
 
 ```text
-SFP local index 0..30 → 00001, 00010, ... , 11111
-SC  local index 0..2  → 01, 10, 11
+SFP: Uniform({00001, 00010, ..., 11111})
+SC:  Uniform({01, 10, 11})
 ```
 
-기본 `--sfp-trials 31 --sc-trials 3`은 각 조합을 정확히 한 번 생성합니다. 지정 수가 조합
-수보다 크면 처음 조합부터 순환하며, 작으면 앞쪽 조합까지만 생성합니다. 특정 connector를
-끄려면 해당 trial 수를 `0`으로 설정합니다. 예: SFP `board-view`만 실행하려면
-`--sfp-trials 31 --sc-trials 0`을 사용합니다. target rail은 현재 조합의 활성 rail 중에서만
-seed 기반으로 선택됩니다.
+따라서 `--trials 34`여도 모든 조합이 정확히 한 번씩 나온다는 보장은 없습니다. worker마다
+담당한 각 trial에서 새 조합을 추출하므로 같은 조합이 반복되거나 일부 조합이 빠질 수 있습니다.
 
 | 옵션 | 기본값 | 설명 |
 | --- | ---: | --- |
@@ -234,8 +230,8 @@ ws_aic/data/img2pos/<version>/
 
 | 필드 | 의미 |
 | --- | --- |
-| `seed` | 실행 시 전달한 `--seed` 값 |
-| `trials` | 실행한 총 trial 수: `sfp_trials + sc_trials` |
+| `seed` | 실행 시작 시 자동 생성된 master seed |
+| `trials` | 실행한 전체 trial 수 |
 
 `samples.jsonl`의 한 row는 동일한 `capture_stamp_ns`를 공유하는 동기화 capture 하나에 대응합니다.
 

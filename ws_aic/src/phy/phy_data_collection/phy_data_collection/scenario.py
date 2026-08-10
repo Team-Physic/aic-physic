@@ -109,24 +109,9 @@ def _present_entity(name: str, translation: float = 0.0, yaw: float = 0.0) -> di
     }
 
 
-def _combination_mask(local_index: int, rail_count: int) -> int:
-    """local trial index를 0이 아닌 rail bitmask에 순환 대응한다."""
-    return local_index % ((1 << rail_count) - 1) + 1
-
-
 def _active_rails(mask: int, rail_count: int) -> list[int]:
     """bitmask에서 활성 rail index를 낮은 번호 순서로 반환한다."""
     return [index for index in range(rail_count) if mask & (1 << index)]
-
-
-def trial_identity(index: int, sfp_trials: int) -> tuple[str, int, int, str]:
-    """global index의 connector, local index와 card bitmask를 반환한다."""
-    if index < sfp_trials:
-        port_type, local_index, rail_count = "sfp", index, SFP_NIC_RAIL_COUNT
-    else:
-        port_type, local_index, rail_count = "sc", index - sfp_trials, SC_RAIL_COUNT
-    mask = _combination_mask(local_index, rail_count)
-    return port_type, local_index, mask, f"{mask:0{rail_count}b}"
 
 
 def _nic_rails(poses: dict[int, tuple[float, float]]) -> dict:
@@ -444,8 +429,10 @@ def make_trial_config(
     rng: random.Random,
     args: argparse.Namespace,
 ) -> tuple[dict, dict]:
-    """global trial index에 대응하는 connector와 card 조합 config를 만든다."""
-    port_type, _, combination_mask, _ = trial_identity(index, args.sfp_trials)
+    """선택 connector의 non-empty card 조합을 uniform 추출해 trial config를 만든다."""
+    port_type = args.port_type
+    rail_count = SFP_NIC_RAIL_COUNT if port_type == "sfp" else SC_RAIL_COUNT
+    combination_mask = rng.randint(1, (1 << rail_count) - 1)
     if port_type == "sfp":
         task_id, trial, scenario_params = _make_sfp_trial(
             index, combination_mask, rng, args

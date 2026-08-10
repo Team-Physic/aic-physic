@@ -1,16 +1,17 @@
 import argparse
 import json
 import random
+from collections import Counter
 
 from phy_data_collection import main, runtime
 from phy_data_collection.cli import build_parser
-from phy_data_collection.scenario import make_trial_config, trial_identity
+from phy_data_collection.scenario import make_trial_config
 
 
-def _args():
+def _args(port_type="sfp"):
     return argparse.Namespace(
-        sfp_trials=31,
-        sc_trials=3,
+        port_type=port_type,
+        trials=34,
         seed=30,
         cable_rpy_noise_deg=20.0,
         time_limit_s=600,
@@ -20,42 +21,36 @@ def _args():
     )
 
 
-def test_global_trial_indices_cover_all_nonempty_card_combinations():
-    args = _args()
-    observed = {"sfp": [], "sc": []}
+def test_trials_uniformly_sample_valid_nonempty_card_combinations():
+    for port_type, masks, rail_count in (("sfp", range(1, 32), 5), ("sc", range(1, 4), 2)):
+        args = _args(port_type)
+        observed = Counter()
+        for index in range(3400):
+            config, metadata_by_task = make_trial_config(
+                index,
+                random.Random(30 + index * 1_000_003),
+                args,
+            )
+            task_id, metadata = next(iter(metadata_by_task.items()))
+            observed[metadata["combination_mask"]] += 1
+            trial = next(iter(config["trials"].values()))
+            task = trial["tasks"][task_id]
+            target_rail = metadata["rail_idx"]
 
-    for index in range(args.sfp_trials + args.sc_trials):
-        config, metadata_by_task = make_trial_config(
-            index,
-            random.Random(30 + index * 1_000_003),
-            args,
-        )
-        task_id, metadata = next(iter(metadata_by_task.items()))
-        port_type = metadata["port_type"]
-        observed[port_type].append(metadata["combination_mask"])
-        trial = next(iter(config["trials"].values()))
-        task = trial["tasks"][task_id]
-        target_rail = metadata["rail_idx"]
-
-        assert target_rail in metadata["active_rails"]
-        if port_type == "sfp":
-            assert task["target_module_name"] == f"nic_card_mount_{target_rail}"
+            assert metadata["port_type"] == port_type
+            assert target_rail in metadata["active_rails"]
+            prefix = "nic_card_mount" if port_type == "sfp" else "sc_port"
+            assert task["target_module_name"] == f"{prefix}_{target_rail}"
+            rail_prefix = "nic_rail" if port_type == "sfp" else "sc_rail"
             active = [
                 rail
-                for rail in range(5)
-                if trial["scene"]["task_board"][f"nic_rail_{rail}"]["entity_present"]
+                for rail in range(rail_count)
+                if trial["scene"]["task_board"][f"{rail_prefix}_{rail}"]["entity_present"]
             ]
-        else:
-            assert task["target_module_name"] == f"sc_port_{target_rail}"
-            active = [
-                rail
-                for rail in range(2)
-                if trial["scene"]["task_board"][f"sc_rail_{rail}"]["entity_present"]
-            ]
-        assert active == metadata["active_rails"]
+            assert active == metadata["active_rails"]
 
-    assert observed["sfp"] == list(range(1, 32))
-    assert observed["sc"] == list(range(1, 4))
+        assert set(observed) == set(masks)
+        assert max(observed.values()) / min(observed.values()) < 2.0
 
 
 def test_worker_assignment_preserves_every_global_index_once():
@@ -66,15 +61,9 @@ def test_worker_assignment_preserves_every_global_index_once():
     assert len(flattened) == len(set(flattened))
 
 
-def test_combination_identity_is_independent_of_seed():
-    assert trial_identity(0, 31) == ("sfp", 0, 1, "00001")
-    assert trial_identity(30, 31) == ("sfp", 30, 31, "11111")
-    assert trial_identity(31, 31) == ("sc", 0, 1, "01")
-    assert trial_identity(33, 31) == ("sc", 2, 3, "11")
-
-
 def test_policy_environment_contains_trial_index(tmp_path):
-    args = build_parser().parse_args(["--dry-run", "--seed", "7"])
+    args = build_parser().parse_args(["--dry-run", "--port-type", "sfp"])
+    args.seed = 7
     main._prepare_args(args)
 
     env = runtime._policy_environment(
@@ -91,8 +80,9 @@ def test_policy_environment_contains_trial_index(tmp_path):
 
 def test_metadata_contains_seed_and_total_trials(monkeypatch, tmp_path):
     args = build_parser().parse_args(
-        ["--dry-run", "--seed", "7", "--sfp-trials", "31", "--sc-trials", "3"]
+        ["--dry-run", "--port-type", "sfp", "--trials", "34"]
     )
+    monkeypatch.setattr(main.secrets, "randbits", lambda _bits: 7)
     main._prepare_args(args)
     monkeypatch.setattr(main, "dataset_dir", lambda _args: tmp_path)
 

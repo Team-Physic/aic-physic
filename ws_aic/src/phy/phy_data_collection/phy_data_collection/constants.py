@@ -48,10 +48,8 @@ ROSBAG_TOPICS = (
 
 CLI_DEFAULTS = {
     # Trial and simulator.
-    "sfp_trials": 31,
-    "sc_trials": 3,
+    "trials": 34,
     "workers": 1,
-    "seed": 30,
     "color_log": True,
     "samples_per_trial": 40,
     "time_limit_s": 600,

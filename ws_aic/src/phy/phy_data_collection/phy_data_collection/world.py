@@ -113,8 +113,7 @@ def log_trial_randomization(
 
     sim_parts = [
         f"headless={bool(args.headless)}",
-        f"sfp_trials={args.sfp_trials}",
-        f"sc_trials={args.sc_trials}",
+        f"trials={args.trials}",
         f"samples={args.samples_per_trial}",
     ]
     if not lighting.get("enabled"):

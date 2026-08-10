@@ -36,11 +36,10 @@ def _add_argument(
 
 
 def _add_trial_args(parser: argparse.ArgumentParser) -> None:
-    """connector별 trial 개수와 simulator 시작 인자를 추가한다."""
-    _add_argument(parser, "sfp_trials", type=int)
-    _add_argument(parser, "sc_trials", type=int)
+    """trial 개수와 simulator 시작 인자를 추가한다."""
+    parser.add_argument("--port-type", required=True, choices=("sfp", "sc"))
+    _add_argument(parser, "trials", type=int)
     _add_argument(parser, "workers", type=int)
-    _add_argument(parser, "seed", type=int)
     _add_argument(parser, "color_log", type=_parse_bool, metavar=BOOLEAN_METAVAR)
     _add_argument(parser, "samples_per_trial", type=int)
     _add_argument(parser, "time_limit_s", type=int)

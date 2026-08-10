@@ -95,8 +95,8 @@ cd aic-physic/ws_aic/src
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
   --collection-policy near-port \
-  --sfp-trials 31 \
-  --sc-trials 3 \
+  --port-type sfp \
+  --trials 34 \
   --workers 2 \
   --samples-per-trial 40 \
   --dataset-version img2pos-v1 \
@@ -142,7 +142,7 @@ img2pos/<version>/
     └── test/<camera>/*.jpg
 ```
 
-`metadata.jsonl`은 수집 실행마다 `seed`와 총 `trials`를 한 행으로 기록합니다.
+`metadata.jsonl`은 수집 실행마다 자동 생성된 `seed`와 총 `trials`를 한 행으로 기록합니다.
 `samples.jsonl`은 동기화된 capture당 한 행이며 `images`에 camera별 JPEG 경로를 묶고,
 `collection_policy`, 단일 `target_xyz_m`, 실제 port-local sampling offset과 관측 거리,
 sampling tier, 촬영 시각·동기화 오차, pose 수렴 품질을 한 번만 기록합니다.

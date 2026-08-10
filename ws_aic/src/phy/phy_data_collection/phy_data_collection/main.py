@@ -8,6 +8,7 @@ import json
 import multiprocessing
 import os
 import random
+import secrets
 import signal
 import socket
 import time
@@ -368,11 +369,10 @@ def _port_is_available(port: int) -> bool:
 
 def _prepare_args(args: argparse.Namespace) -> None:
     """대규모/병렬 수집 인자를 검증하고 안전한 기본 출력 version을 확정한다."""
-    if args.sfp_trials < 0 or args.sc_trials < 0:
-        raise ValueError("sfp-trials and sc-trials must be non-negative")
-    args.trials = args.sfp_trials + args.sc_trials
     if args.trials < 1 or args.samples_per_trial < 1:
-        raise ValueError("total trials and samples-per-trial must be positive")
+        raise ValueError("trials and samples-per-trial must be positive")
+    if not hasattr(args, "seed"):
+        args.seed = secrets.randbits(64)
     if args.workers < 1 or args.workers > args.trials:
         raise ValueError("workers must be between 1 and trials")
     if not 0.0 <= args.val_ratio < 1.0 or not 0.0 <= args.test_ratio < 1.0:
