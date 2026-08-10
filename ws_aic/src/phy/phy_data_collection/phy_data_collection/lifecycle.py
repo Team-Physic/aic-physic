@@ -13,7 +13,6 @@ from pathlib import Path
 
 from .constants import (
     CONFIG_DIR,
-    LEGACY_POLICY_STOP_FILE,
     REGISTRY_FILENAME,
     RUN_MARKER_ENV,
 )
@@ -269,26 +268,6 @@ def _load_registry(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _legacy_collection_pgids() -> set[int]:
-    """registry 도입 전 고유 config 경로를 사용한 수집 PGID를 찾는다."""
-    pgids: set[int] = set()
-    config_root = str(CONFIG_DIR).encode()
-    try:
-        entries = list(Path("/proc").iterdir())
-    except OSError:
-        return pgids
-    for entry in entries:
-        if not entry.name.isdigit():
-            continue
-        cmdline = _read_proc_bytes(int(entry.name), "cmdline")
-        if config_root not in cmdline or b"aic_engine_config_file:=" not in cmdline:
-            continue
-        info = _process_state_and_pgid(int(entry.name))
-        if info is not None and info[0] != "Z" and info[1] != os.getpgrp():
-            pgids.add(info[1])
-    return pgids
-
-
 def _record_fields(record: object) -> tuple[int, str, str] | None:
     """registry 레코드를 검증해 PGID, marker, 종류로 변환한다."""
     if not isinstance(record, dict):
@@ -307,12 +286,6 @@ def cleanup_stale_processes(args: argparse.Namespace) -> bool:
     """run marker로 소유권이 입증된 이전 수집 PGID만 정리한다."""
     print("[cleanup] stale PortOffsetCollect process groups 정리 중...")
     success = True
-    handled_pgids: set[int] = set()
-    try:
-        LEGACY_POLICY_STOP_FILE.write_text("stop\n", encoding="utf-8")
-    except OSError:
-        pass
-
     for registry_path in CONFIG_DIR.glob(f"*/{REGISTRY_FILENAME}"):
         registry = _load_registry(registry_path)
         if registry is None:
@@ -338,7 +311,6 @@ def cleanup_stale_processes(args: argparse.Namespace) -> bool:
                     "PID reuse 가능성이 있어 종료하지 않음"
                 )
                 continue
-            handled_pgids.add(pgid)
             if kind == "simulator":
                 sigint_grace_s = args.sim_sigint_grace_s
             elif kind == "rosbag":
@@ -361,21 +333,4 @@ def cleanup_stale_processes(args: argparse.Namespace) -> bool:
             except OSError:
                 pass
 
-    for pgid in sorted(_legacy_collection_pgids() - handled_pgids):
-        success &= terminate_pgid(
-            pgid,
-            label="legacy simulator",
-            sigint_grace_s=args.sim_sigint_grace_s,
-            sigterm_grace_s=args.sim_cleanup_grace_s,
-            sigkill_grace_s=args.sim_sigkill_grace_s,
-        )
-
-    try:
-        LEGACY_POLICY_STOP_FILE.unlink()
-    except OSError:
-        pass
-    remaining = _legacy_collection_pgids()
-    if remaining:
-        print(f"[error] collector-owned simulator PGIDs remain: {sorted(remaining)}")
-        return False
     return success

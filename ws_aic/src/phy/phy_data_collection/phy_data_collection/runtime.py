@@ -18,7 +18,7 @@ import yaml
 
 from .constants import (
     ANSI_COLORS,
-    DATA_GENERATOR_PACKAGE_ROOT,
+    POLICY_PACKAGE_ROOT,
     DATASET_ROOT,
     EPISODE_TRACKING_DIR,
     PIXI_WS,
@@ -145,8 +145,6 @@ def start_rosbag(
     env["PIXI_COLOR"] = "never"
     env["PIXI_NO_PROGRESS"] = "true"
     cmd = [
-        "pixi",
-        "run",
         "ros2",
         "bag",
         "record",
@@ -282,19 +280,12 @@ def _set_optional_env(
 
 def write_inputs(
     config: dict,
-    scenario_params: dict,
     config_path: Path,
-    scenario_params_path: Path,
 ) -> None:
-    """trial별 engine YAML과 추적용 scenario JSON을 고유 경로에 저장한다."""
+    """trial별 AIC engine YAML을 고유 경로에 저장한다."""
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
-    scenario_params_path.parent.mkdir(parents=True, exist_ok=True)
-    scenario_params_path.write_text(
-        json.dumps(scenario_params, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
 
@@ -302,41 +293,32 @@ def write_inputs(
 def _policy_environment(
     args: argparse.Namespace,
     *,
-    scenario_params_path: Path,
     stop_file: Path,
     run_id: str,
     trial_index: int | None = None,
-    rosbag_path: Path | None = None,
 ) -> dict[str, str]:
     """PortOffsetCollect가 사용할 ROS 2 및 데이터 수집 환경변수를 구성한다."""
     env = os.environ.copy()
-    python_paths = [str(DATA_GENERATOR_PACKAGE_ROOT)]
+    python_paths = [str(POLICY_PACKAGE_ROOT)]
     if env.get("PYTHONPATH"):
         python_paths.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(python_paths)
-    env["AIC_SCENARIO_PARAMS_FILE"] = str(scenario_params_path)
     env["AIC_CAPTURE_DIR"] = str(EPISODE_TRACKING_DIR)
     env["AIC_STOP_FILE"] = str(stop_file)
     env[RUN_MARKER_ENV] = run_id
     if trial_index is not None:
         env["AIC_PORTOFFSET_TRIAL_INDEX"] = str(trial_index)
-    if rosbag_path is not None:
-        env["AIC_PORTOFFSET_ROSBAG_PATH"] = str(rosbag_path.resolve())
     env["AIC_COLLECT_STEPS"] = str(args.samples_per_trial)
-    env["AIC_RPY_DATASET_VERSION"] = args.dataset_version.strip()
-    env["AIC_VISION_OFFSET_DATASET_DIR"] = str(dataset_dir(args))
-    env["AIC_VISION_OFFSET_PUSH_TO_HUB"] = "true" if args.push_to_hub else "false"
-    if args.vision_offset_repo_id:
-        env["AIC_VISION_OFFSET_REPO_ID"] = args.vision_offset_repo_id
-    if args.vision_offset_hf_revision:
-        env["AIC_VISION_OFFSET_HF_REVISION"] = args.vision_offset_hf_revision
-    if args.vision_offset_hf_path_in_repo:
-        env["AIC_VISION_OFFSET_HF_PATH_IN_REPO"] = args.vision_offset_hf_path_in_repo
-    env["AIC_VISION_OFFSET_UPLOAD_ON_PORT_TYPE"] = args.upload_on_port_type
-    env["AIC_VISION_OFFSET_HF_PRIVATE"] = "true" if args.hf_private else "false"
+    env["AIC_IMG2POS_DATASET_VERSION"] = args.dataset_version.strip()
+    env["AIC_IMG2POS_DATASET_DIR"] = str(dataset_dir(args))
+    env["AIC_IMG2POS_PUSH_TO_HUB"] = "true" if args.push_to_hub else "false"
+    if args.hf_repo_id:
+        env["AIC_IMG2POS_HF_REPO_ID"] = args.hf_repo_id
+    if args.hf_revision:
+        env["AIC_IMG2POS_HF_REVISION"] = args.hf_revision
+    env["AIC_IMG2POS_UPLOAD_ON_PORT_TYPE"] = args.upload_on_port_type
+    env["AIC_IMG2POS_HF_PRIVATE"] = "true" if args.hf_private else "false"
 
-    env["AIC_PORT_COLLECT_XY_LIMIT_MM"] = str(args.port_xy_limit_mm)
-    env["AIC_PORT_COLLECT_Z_LIMIT_MM"] = str(args.port_z_limit_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MIN_MM", args.dx_min_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MAX_MM", args.dx_max_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DY_MIN_MM", args.dy_min_mm)
@@ -353,53 +335,38 @@ def _policy_environment(
     _set_optional_env(env, "AIC_PORT_COLLECT_YAW_MIN_DEG", args.yaw_min_deg)
     _set_optional_env(env, "AIC_PORT_COLLECT_YAW_MAX_DEG", args.yaw_max_deg)
     _set_optional_env(env, "AIC_PORT_COLLECT_RPY_NORM_MAX_RAD", args.rpy_norm_max_rad)
-    _set_optional_env(
-        env,
-        "AIC_PORT_ACTUAL_RPY_NORM_MAX_RAD",
-        args.actual_rpy_norm_max_rad,
-    )
-
-    env["AIC_RPY_MIN_VISIBLE_CAMERAS"] = str(args.min_visible_cameras)
-    env["AIC_RPY_VISIBILITY_MARGIN_PX"] = str(args.visibility_margin_px)
+    env["AIC_IMG2POS_MIN_VISIBLE_CAMERAS"] = str(args.min_visible_cameras)
+    env["AIC_IMG2POS_VISIBILITY_MARGIN_PX"] = str(args.visibility_margin_px)
     env["AIC_PORT_COLLECT_BASE_Z_OFFSET_M"] = str(args.base_z_offset_mm / 1000.0)
     env["AIC_COLLECT_SYNC_TOLERANCE_MS"] = str(args.sync_tolerance_ms)
     env["AIC_COLLECT_SYNC_WAIT_TIMEOUT_SEC"] = str(args.sync_wait_timeout_s)
     env["AIC_COLLECT_COLOR_LOG"] = "true" if args.color_log else "false"
-    env["AIC_LEROBOT_REPO_ID"] = ""
     env["RMW_IMPLEMENTATION"] = env.get("RMW_IMPLEMENTATION", "rmw_zenoh_cpp")
     env["ZENOH_CONFIG_OVERRIDE"] = "transport/shared_memory/enabled=false"
     env["RCUTILS_COLORIZED_OUTPUT"] = "0"
     env["RCUTILS_LOGGING_BUFFERED_STREAM"] = "1"
-    env["PIXI_COLOR"] = "never"
-    env["PIXI_NO_PROGRESS"] = "true"
     return env
 
 
 def start_policy(
     args: argparse.Namespace,
     *,
-    scenario_params_path: Path,
     stop_file: Path,
     run_id: str,
     trial_index: int | None = None,
-    rosbag_path: Path | None = None,
 ) -> subprocess.Popen:
     """PortOffsetCollect ROS 2 node를 독립 session/PGID로 실행한다."""
     env = _policy_environment(
         args,
-        scenario_params_path=scenario_params_path,
         stop_file=stop_file,
         run_id=run_id,
         trial_index=trial_index,
-        rosbag_path=rosbag_path,
     )
     try:
         stop_file.unlink()
     except FileNotFoundError:
         pass
     cmd = [
-        "pixi",
-        "run",
         "ros2",
         "run",
         "aic_model",

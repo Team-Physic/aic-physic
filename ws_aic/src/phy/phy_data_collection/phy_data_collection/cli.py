@@ -66,9 +66,8 @@ def _add_dataset_args(parser: argparse.ArgumentParser) -> None:
     """dataset 경로와 Hugging Face 업로드 관련 인자를 추가한다."""
     _add_argument(parser, "dataset_version")
     _add_argument(parser, "push_to_hub", type=_parse_bool, metavar=BOOLEAN_METAVAR)
-    _add_argument(parser, "vision_offset_repo_id")
-    _add_argument(parser, "vision_offset_hf_revision")
-    _add_argument(parser, "vision_offset_hf_path_in_repo")
+    _add_argument(parser, "hf_repo_id")
+    _add_argument(parser, "hf_revision")
     _add_argument(
         parser,
         "upload_on_port_type",
@@ -94,8 +93,6 @@ def _add_rosbag_args(parser: argparse.ArgumentParser) -> None:
 def _add_pose_args(parser: argparse.ArgumentParser) -> None:
     """port-local XYZ/RPY sampling 범위 인자를 추가한다."""
     for name in (
-        "port_xy_limit_mm",
-        "port_z_limit_mm",
         "dx_min_mm",
         "dx_max_mm",
         "dy_min_mm",
@@ -112,7 +109,6 @@ def _add_pose_args(parser: argparse.ArgumentParser) -> None:
         "yaw_min_deg",
         "yaw_max_deg",
         "rpy_norm_max_rad",
-        "actual_rpy_norm_max_rad",
         "base_z_offset_mm",
         "visibility_margin_px",
     ):

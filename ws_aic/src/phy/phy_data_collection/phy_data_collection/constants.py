@@ -10,7 +10,7 @@ from phy_data_collection.paths import PROJECT_ROOT
 ROOT = PROJECT_ROOT
 WS_SRC = ROOT / "ws_aic" / "src"
 PIXI_WS = WS_SRC
-DATA_GENERATOR_PACKAGE_ROOT = WS_SRC / "phy" / "phy_policy" / "data_generator"
+POLICY_PACKAGE_ROOT = WS_SRC / "phy" / "phy_policy"
 DATASET_ROOT = ROOT / "ws_aic" / "data" / "img2pos"
 ROSBAG_ROOT = ROOT / "rosbags" / "portoffset"
 CONFIG_DIR = Path("/tmp/phy_portoffset_randomization")
@@ -18,9 +18,8 @@ WORLD_TEMPLATE_PATH = (
     ROOT / "ws_aic" / "src" / "aic" / "aic_description" / "world" / "aic.sdf"
 )
 EPISODE_TRACKING_DIR = Path("/tmp/aic_episodes")
-LEGACY_POLICY_STOP_FILE = Path("/tmp/aic_policy_stop")
 
-POLICY_MODULE = "data_generator.PortOffsetCollect"
+POLICY_MODULE = "phy_policy.ros.PortOffsetCollect"
 ENGINE_SETUP = "/ws_aic/install/setup.bash"
 RUN_MARKER_ENV = "AIC_PORTOFFSET_RUN_ID"
 REGISTRY_FILENAME = "owned_process_groups.json"
@@ -67,14 +66,11 @@ CLI_DEFAULTS = {
     # Dataset and Hugging Face.
     "dataset_version": "",
     "push_to_hub": False,
-    "vision_offset_repo_id": "aic-sejong-team/aic-vision-offset-dataset",
-    "vision_offset_hf_revision": "main",
-    "vision_offset_hf_path_in_repo": "",
+    "hf_repo_id": "aic-sejong-team/aic-vision-offset-dataset",
+    "hf_revision": "main",
     "upload_on_port_type": "",
     "hf_private": False,
     # Port-local pose sampling.
-    "port_xy_limit_mm": 50.0,
-    "port_z_limit_mm": 100.0,
     "dx_min_mm": -50.0,
     "dx_max_mm": 50.0,
     "dy_min_mm": -50.0,
@@ -91,7 +87,6 @@ CLI_DEFAULTS = {
     "yaw_min_deg": None,
     "yaw_max_deg": None,
     "rpy_norm_max_rad": None,
-    "actual_rpy_norm_max_rad": None,
     "base_z_offset_mm": 0.0,
     "min_visible_cameras": 2,
     "visibility_margin_px": 64.0,

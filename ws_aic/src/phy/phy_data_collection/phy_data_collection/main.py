@@ -13,13 +13,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from phy_data_collection.portoffset_randomization.cli import parse_args
-from phy_data_collection.portoffset_randomization.constants import (
+from phy_data_collection.cli import parse_args
+from phy_data_collection.constants import (
     CONFIG_DIR,
     REGISTRY_FILENAME,
     TRIAL_TIMEOUT_GRACE_S,
 )
-from phy_data_collection.portoffset_randomization.lifecycle import (
+from phy_data_collection.lifecycle import (
     OwnedProcessGroup,
     cleanup_stale_processes,
     process_groups_with_cmdline_marker,
@@ -28,7 +28,7 @@ from phy_data_collection.portoffset_randomization.lifecycle import (
     terminate_owned_group,
     write_group_registry,
 )
-from phy_data_collection.portoffset_randomization.runtime import (
+from phy_data_collection.runtime import (
     RosbagSession,
     known_episode_summaries,
     rosbag_output_dir,
@@ -41,8 +41,8 @@ from phy_data_collection.portoffset_randomization.runtime import (
     wait_for_trial_summary,
     write_inputs,
 )
-from phy_data_collection.portoffset_randomization.scenario import make_trial_config
-from phy_data_collection.portoffset_randomization.world import (
+from phy_data_collection.scenario import make_trial_config
+from phy_data_collection.world import (
     log_trial_randomization,
     write_randomized_world,
 )
@@ -133,12 +133,11 @@ def _register_inner_simulator_groups(
     ]
 
 
-def _trial_paths(ctx: RunContext, index: int) -> tuple[Path, Path, Path]:
-    """trial별 engine config, scenario, world의 고유 경로를 반환한다."""
+def _trial_paths(ctx: RunContext, index: int) -> tuple[Path, Path]:
+    """trial별 engine config와 world의 고유 경로를 반환한다."""
     trial_dir = ctx.run_dir / f"trial_{index:04d}"
     return (
         trial_dir / "engine_config.yaml",
-        trial_dir / "scenario_params.json",
         trial_dir / "randomized_world.sdf",
     )
 
@@ -147,9 +146,9 @@ def _prepare_trial(
     ctx: RunContext,
     index: int,
     rng: random.Random,
-) -> tuple[str, dict, Path, Path, Path | None, dict]:
+) -> tuple[str, Path, Path | None, dict]:
     """시나리오와 world를 랜덤화하고 trial 입력 파일을 기록한다."""
-    config_path, scenario_path, requested_world_path = _trial_paths(ctx, index)
+    config_path, requested_world_path = _trial_paths(ctx, index)
     config, scenario_params = make_trial_config(index, rng, ctx.args)
     task_id = next(iter(scenario_params))
     world_path, lighting = write_randomized_world(
@@ -159,7 +158,7 @@ def _prepare_trial(
         requested_world_path,
     )
     scenario_params[task_id]["lighting"] = lighting
-    write_inputs(config, scenario_params, config_path, scenario_path)
+    write_inputs(config, config_path)
     log_trial_randomization(
         index=index,
         total=ctx.args.trials,
@@ -168,7 +167,7 @@ def _prepare_trial(
         lighting=lighting,
         args=ctx.args,
     )
-    return task_id, scenario_params, config_path, scenario_path, world_path, lighting
+    return task_id, config_path, world_path, lighting
 
 
 def _print_dry_run(
@@ -185,14 +184,7 @@ def _print_dry_run(
 
 def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
     """하나의 trial을 실행하고 소유한 policy, rosbag, simulator를 검증한다."""
-    (
-        task_id,
-        _,
-        config_path,
-        scenario_path,
-        world_path,
-        lighting,
-    ) = _prepare_trial(ctx, index, rng)
+    task_id, config_path, world_path, lighting = _prepare_trial(ctx, index, rng)
     if ctx.args.dry_run:
         _print_dry_run(config_path, world_path, lighting)
         return
@@ -261,19 +253,15 @@ def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
                 raise RuntimeError("rosbag recorder failed to start")
         policy_proc = start_policy(
             ctx.args,
-            scenario_params_path=scenario_path,
             stop_file=ctx.stop_file,
             run_id=ctx.run_id,
             trial_index=index,
-            rosbag_path=(
-                rosbag_session.output_dir if rosbag_session is not None else None
-            ),
         )
         policy_group = register_owned_group(
             policy_proc,
             kind="policy",
             run_id=ctx.run_id,
-            marker=str(scenario_path),
+            marker=str(ctx.stop_file),
         )
         ctx.active_groups.append(policy_group)
         _persist_groups(ctx)
