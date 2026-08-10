@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import random
+import sys
 from collections import Counter
 
 from phy_data_collection import main, runtime, scenario
@@ -142,7 +143,7 @@ def test_metadata_contains_seed_and_total_trials(monkeypatch, tmp_path):
     }
 
 
-def test_worker_continues_after_one_trial_failure(monkeypatch):
+def test_worker_continues_after_one_trial_failure(monkeypatch, tmp_path):
     attempted = []
 
     def run_trial(ctx, index, rng):
@@ -152,8 +153,118 @@ def test_worker_continues_after_one_trial_failure(monkeypatch):
 
     monkeypatch.setattr(main, "_run_trial", run_trial)
     monkeypatch.setattr(main, "_persist_groups", lambda ctx: None)
+    monkeypatch.setattr(main, "COLLECTION_LOG_ROOT", tmp_path)
 
     result = main._run_worker(_args(), "run", 0, [0, 1, 2])
 
     assert attempted == [0, 1, 2]
     assert result == 1
+
+
+def test_trial_output_writes_details_to_log_without_terminal_noise(tmp_path, capsys):
+    args = argparse.Namespace(dry_run=False)
+    log_path = tmp_path / "trial_0000.log"
+
+    with main._trial_output(args, log_path):
+        print("gazebo detail")
+        print("gazebo error", file=sys.stderr)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert log_path.read_text(encoding="utf-8") == "gazebo detail\ngazebo error\n"
+
+
+def test_capture_log_emits_progress_event():
+    class RecordingQueue:
+        def __init__(self):
+            self.events = []
+
+        def put(self, event):
+            self.events.append(event)
+
+    progress_queue = RecordingQueue()
+
+    main._report_capture_progress(
+        progress_queue,
+        2,
+        17,
+        "[PortOffsetCollect] CAPTURE SAVED: capture_id=x, saved_count=7; skew=0",
+    )
+
+    assert progress_queue.events[0]["event"] == "capture_saved"
+    assert progress_queue.events[0]["worker_id"] == 2
+    assert progress_queue.events[0]["trial_index"] == 17
+    assert progress_queue.events[0]["saved_count"] == 7
+
+
+def test_progress_lines_report_parallel_captures_elapsed_and_failures():
+    workers = {
+        0: main.WorkerProgress(worker_id=0),
+        1: main.WorkerProgress(worker_id=1),
+    }
+    main._apply_progress_event(
+        workers,
+        {
+            "event": "trial_started",
+            "worker_id": 0,
+            "trial_index": 0,
+            "timestamp": 100.0,
+            "log_path": "/logs/worker_00/trial_0000.log",
+        },
+    )
+    main._apply_progress_event(
+        workers,
+        {
+            "event": "trial_started",
+            "worker_id": 1,
+            "trial_index": 1,
+            "timestamp": 105.0,
+            "log_path": "/logs/worker_01/trial_0001.log",
+        },
+    )
+    main._apply_progress_event(
+        workers,
+        {
+            "event": "capture_saved",
+            "worker_id": 0,
+            "trial_index": 0,
+            "saved_count": 7,
+            "timestamp": 120.0,
+        },
+    )
+    main._apply_progress_event(
+        workers,
+        {
+            "event": "capture_saved",
+            "worker_id": 1,
+            "trial_index": 1,
+            "saved_count": 13,
+            "timestamp": 125.0,
+        },
+    )
+
+    running = main._progress_lines(workers, 4, 20, 90.0, 130.0)
+
+    assert "trials=0/4 captures=20/80 (25.0%)" in running[0]
+    assert "[W0] trial_000 captures=7/20 elapsed=00:00:30" in running
+    assert "[W1] trial_001 captures=13/20 elapsed=00:00:25" in running
+
+    main._apply_progress_event(
+        workers,
+        {"event": "trial_completed", "worker_id": 0, "timestamp": 135.0},
+    )
+    main._apply_progress_event(
+        workers,
+        {
+            "event": "trial_failed",
+            "worker_id": 1,
+            "timestamp": 136.0,
+            "error": "trial_001: failed",
+        },
+    )
+
+    finished = main._progress_lines(workers, 4, 20, 90.0, 140.0)
+
+    assert "trials=2/4 captures=20/80 (25.0%) failures=1" in finished[0]
+    assert workers[1].error_log_path == "/logs/worker_01/trial_0001.log"

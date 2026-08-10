@@ -103,6 +103,11 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   --push-to-hub false
 ```
 
+터미널에는 전체 trial/capture 진행률과 worker별 현재 trial·capture 수·경과시간만
+표시됩니다. Gazebo·ROS 상세
+출력은 `ws_aic/logs/data_collection/<dataset-version>/<run-id>/` 아래 trial별 파일에
+저장됩니다.
+
 전체 CLI와 데이터 형식은
 [`phy_data_collection/README.md`](ws_aic/src/phy/phy_data_collection/README.md)를
 참고하십시오.

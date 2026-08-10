@@ -400,6 +400,7 @@ def start_policy(
     run_id: str,
     trial_index: int | None = None,
     trial_split: str = "",
+    line_callback: Callable[[str], None] | None = None,
 ) -> subprocess.Popen:
     """PortOffsetCollect ROS 2 node를 독립 session/PGID로 실행한다."""
     env = _policy_environment(
@@ -425,7 +426,12 @@ def start_policy(
         f"policy:={args.policy}",
     ]
     print("[policy] " + shlex.join(cmd))
-    return _start_logged_process(cmd, cwd=PIXI_WS, env=env)
+    return _start_logged_process(
+        cmd,
+        cwd=PIXI_WS,
+        env=env,
+        line_callback=line_callback,
+    )
 
 
 def stop_policy(

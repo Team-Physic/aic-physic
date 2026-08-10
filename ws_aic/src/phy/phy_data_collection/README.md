@@ -109,6 +109,17 @@ Task Board pose와 조명을 독립 추출합니다. connector는 `--port-type`�
 trial이 실패해도 worker는 남은 index를 계속 실행하며, 전체 종료 코드는 실패를 유지합니다.
 기본 격리 값은 `ROS_DOMAIN_ID=40+worker`, Zenoh `7600+worker`입니다.
 
+기본 terminal 출력은 전체 완료 trial 수와 저장된 capture 수, 전체 경과시간·예상
+잔여시간, 실패 수를 표시합니다. 각 worker는 현재 trial, `저장 capture/목표 capture`,
+trial 경과시간을 별도 행에 표시하므로 첫 trial이 끝나기 전에도 실제 수집 진행 상황을
+확인할 수 있습니다. Gazebo·ROS·policy 상세 출력은 실행별로 다음 위치에 저장합니다.
+
+```text
+ws_aic/logs/data_collection/<dataset-version>/<run-id>/worker_<id>/trial_<index>.log
+```
+
+`ws_aic/logs/`는 Git에서 제외되며 데이터셋이나 Hugging Face 업로드에도 포함되지 않습니다.
+
 ```bash
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
@@ -382,6 +393,10 @@ prediction coverage, `XYZ MAE(mm)`, `3D error p95(mm)`, `5mm 이내 비율`을 �
 | 모듈/함수 | 책임 |
 | --- | --- |
 | `main._run_trial()` | simulator·rosbag·policy 시작/종료 조율 |
+| `main._run_parallel()` | multiprocessing worker 실행과 progress event 집계 조율 |
+| `main._monitor_progress()` | 전체 capture 진행률과 worker별 현재 trial·capture 수·경과시간 표시 |
+| `main._trial_output()` | trial별 Gazebo·ROS·policy 상세 출력을 로그 파일로 전달 |
+| `runtime.start_policy()` | policy 출력의 capture 저장 event를 progress 집계기로 전달 |
 | `scenario.make_trial_config()` | task board, cable, robot 초기 조건 생성 |
 | `world.write_randomized_world()` | 조명과 배경 world 생성 |
 | `runtime._policy_environment()` | img2pos·pose·동기화 설정 전달 |

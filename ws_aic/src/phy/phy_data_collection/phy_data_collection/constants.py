@@ -11,6 +11,7 @@ WS_SRC = ROOT / "ws_aic" / "src"
 PIXI_WS = WS_SRC
 POLICY_PACKAGE_ROOT = WS_SRC / "phy" / "phy_policy"
 DATASET_ROOT = ROOT / "ws_aic" / "data" / "img2pos"
+COLLECTION_LOG_ROOT = ROOT / "ws_aic" / "logs" / "data_collection"
 ROSBAG_ROOT = ROOT / "rosbags" / "portoffset"
 CONFIG_DIR = Path("/tmp/phy_portoffset_randomization")
 WORLD_TEMPLATE_PATH = (

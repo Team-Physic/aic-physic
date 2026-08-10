@@ -9,22 +9,28 @@ import math
 import multiprocessing
 import os
 import random
+import re
 import secrets
 import signal
 import socket
+import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
+from queue import Empty
+from typing import Any
 
 from phy_data_collection.cli import parse_args
 from phy_data_collection.constants import (
+    COLLECTION_LOG_ROOT,
     COLLECTION_POLICY_MODULES,
     CONFIG_DIR,
     MIN_CLEARANCE_MM,
     REGISTRY_FILENAME,
     TRIAL_TIMEOUT_GRACE_S,
 )
+from phy_data_collection.evaluation import summarize_dataset
 from phy_data_collection.lifecycle import (
     OwnedProcessGroup,
     cleanup_stale_processes,
@@ -34,7 +40,6 @@ from phy_data_collection.lifecycle import (
     terminate_owned_group,
     write_group_registry,
 )
-from phy_data_collection.evaluation import summarize_dataset
 from phy_data_collection.runtime import (
     RosbagSession,
     dataset_dir,
@@ -56,6 +61,8 @@ from phy_data_collection.world import (
     write_randomized_world,
 )
 
+CAPTURE_SAVED_RE = re.compile(r"\bsaved_count=(\d+)")
+
 
 @dataclass
 class RunContext:
@@ -67,6 +74,25 @@ class RunContext:
     stop_file: Path
     registry_path: Path
     active_groups: list[OwnedProcessGroup] = field(default_factory=list)
+    progress_queue: Any | None = None
+    worker_id: int | None = None
+
+
+@dataclass
+class WorkerProgress:
+    """부모 프로세스가 표시할 worker별 trial 진행 상태."""
+
+    worker_id: int
+    state: str = "starting"
+    trial_index: int | None = None
+    trial_started_at: float | None = None
+    completed: int = 0
+    failed: int = 0
+    captures: int = 0
+    trial_captures: int = 0
+    error: str = ""
+    log_path: str = ""
+    error_log_path: str = ""
 
 
 @contextmanager
@@ -79,7 +105,44 @@ def _uninterruptible_cleanup():
         signal.signal(signal.SIGINT, previous_handler)
 
 
-def _create_run_context(args: argparse.Namespace, run_id: str | None = None) -> RunContext:
+@contextmanager
+def _trial_output(args: argparse.Namespace, log_path: Path | None = None):
+    """trial 상세 stdout/stderr를 로그 파일에 기록한다."""
+    if getattr(args, "dry_run", False) or log_path is None:
+        yield
+        return
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as log_stream:
+        with redirect_stdout(log_stream), redirect_stderr(log_stream):
+            yield
+
+
+def _run_log_dir(args: argparse.Namespace, parent_run_id: str) -> Path:
+    """dataset version과 run ID로 격리된 상세 로그 디렉터리를 반환한다."""
+    version = str(getattr(args, "dataset_version", "")).strip() or "unversioned"
+    return COLLECTION_LOG_ROOT / version / parent_run_id
+
+
+def _trial_log_path(
+    args: argparse.Namespace,
+    parent_run_id: str,
+    worker_id: int,
+    trial_index: int,
+) -> Path:
+    """worker와 global trial index가 드러나는 상세 로그 경로를 반환한다."""
+    return (
+        _run_log_dir(args, parent_run_id)
+        / f"worker_{worker_id:02d}"
+        / f"trial_{trial_index:04d}.log"
+    )
+
+
+def _create_run_context(
+    args: argparse.Namespace,
+    run_id: str | None = None,
+    progress_queue: Any | None = None,
+    worker_id: int | None = None,
+) -> RunContext:
     """PID와 시각으로 충돌하지 않는 실행 ID 및 runtime 경로를 만든다."""
     run_id = run_id or f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     run_dir = CONFIG_DIR / run_id
@@ -89,6 +152,8 @@ def _create_run_context(args: argparse.Namespace, run_id: str | None = None) -> 
         run_dir=run_dir,
         stop_file=run_dir / "policy_stop",
         registry_path=run_dir / REGISTRY_FILENAME,
+        progress_queue=progress_queue,
+        worker_id=worker_id,
     )
 
 
@@ -260,12 +325,21 @@ def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
             _persist_groups(ctx)
             if not wait_for_rosbag_start(rosbag_session, ctx.args):
                 raise RuntimeError("rosbag recorder failed to start")
+        line_callback = None
+        if ctx.progress_queue is not None and ctx.worker_id is not None:
+            line_callback = lambda line: _report_capture_progress(
+                ctx.progress_queue,
+                ctx.worker_id,
+                index,
+                line,
+            )
         policy_proc = start_policy(
             ctx.args,
             stop_file=ctx.stop_file,
             run_id=ctx.run_id,
             trial_index=index,
             trial_split=_trial_split(ctx.args, index),
+            line_callback=line_callback,
         )
         policy_group = register_owned_group(
             policy_proc,
@@ -461,40 +535,297 @@ def _trial_split(args: argparse.Namespace, index: int) -> str:
     return args.split_assignments[index]
 
 
+def _emit_progress(
+    progress_queue: Any | None,
+    event: str,
+    worker_id: int,
+    **values: Any,
+) -> None:
+    """worker 상태를 부모 progress queue로 전달한다."""
+    if progress_queue is None:
+        return
+    progress_queue.put(
+        {
+            "event": event,
+            "worker_id": worker_id,
+            "timestamp": time.monotonic(),
+            **values,
+        }
+    )
+
+
+def _report_capture_progress(
+    progress_queue: Any,
+    worker_id: int,
+    trial_index: int,
+    line: str,
+) -> None:
+    """policy의 capture 저장 로그를 worker progress event로 변환한다."""
+    if "[PortOffsetCollect] CAPTURE SAVED:" not in line:
+        return
+    match = CAPTURE_SAVED_RE.search(line)
+    if match is None:
+        return
+    _emit_progress(
+        progress_queue,
+        "capture_saved",
+        worker_id,
+        trial_index=trial_index,
+        saved_count=int(match.group(1)),
+    )
+
+
+def _format_duration(seconds: float) -> str:
+    """경과시간을 HH:MM:SS로 표시한다."""
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _apply_progress_event(
+    workers: dict[int, WorkerProgress],
+    event: dict[str, Any],
+) -> None:
+    """queue event를 부모가 보관하는 worker 상태에 반영한다."""
+    worker = workers[int(event["worker_id"])]
+    event_name = event["event"]
+    if event_name == "worker_started":
+        worker.state = "waiting"
+    elif event_name == "trial_started":
+        worker.state = "running"
+        worker.trial_index = int(event["trial_index"])
+        worker.trial_started_at = float(event["timestamp"])
+        worker.trial_captures = 0
+        worker.log_path = str(event.get("log_path", ""))
+    elif event_name == "capture_saved":
+        if int(event["trial_index"]) != worker.trial_index:
+            return
+        saved_count = int(event["saved_count"])
+        if saved_count > worker.trial_captures:
+            worker.captures += saved_count - worker.trial_captures
+            worker.trial_captures = saved_count
+    elif event_name in {"trial_completed", "trial_failed"}:
+        if event_name == "trial_completed":
+            worker.completed += 1
+        else:
+            worker.failed += 1
+            worker.error = str(event.get("error", "trial failed"))
+            worker.error_log_path = worker.log_path
+        worker.state = "waiting"
+        worker.trial_index = None
+        worker.trial_started_at = None
+    elif event_name == "worker_finished":
+        worker.state = "finished"
+    elif event_name == "worker_crashed":
+        worker.state = "crashed"
+        worker.error = str(event.get("error", "worker crashed"))
+        worker.error_log_path = worker.log_path
+
+
+def _progress_lines(
+    workers: dict[int, WorkerProgress],
+    total_trials: int,
+    samples_per_trial: int,
+    started_at: float,
+    now: float,
+) -> list[str]:
+    """전체 capture 진행률과 worker별 현재 trial 상태를 짧은 행들로 만든다."""
+    processed = sum(worker.completed + worker.failed for worker in workers.values())
+    failures = sum(worker.failed for worker in workers.values())
+    captures = sum(worker.captures for worker in workers.values())
+    total_captures = total_trials * samples_per_trial
+    elapsed = max(0.0, now - started_at)
+    percent = captures / total_captures * 100.0 if total_captures else 100.0
+    eta = "--:--:--"
+    if captures:
+        eta = _format_duration(elapsed / captures * (total_captures - captures))
+    lines = [
+        f"[progress] trials={processed}/{total_trials} "
+        f"captures={captures}/{total_captures} ({percent:4.1f}%) failures={failures}",
+        f"[time] elapsed={_format_duration(elapsed)} eta={eta}",
+    ]
+    for worker_id in sorted(workers):
+        worker = workers[worker_id]
+        if worker.state == "running" and worker.trial_started_at is not None:
+            trial_elapsed = _format_duration(now - worker.trial_started_at)
+            lines.append(
+                f"[W{worker_id}] trial_{worker.trial_index:03d} "
+                f"captures={worker.trial_captures}/{samples_per_trial} "
+                f"elapsed={trial_elapsed}"
+            )
+        else:
+            lines.append(
+                f"[W{worker_id}] {worker.state} captures={worker.captures}"
+            )
+    return lines
+
+
+def _show_progress(
+    lines: list[str],
+    *,
+    terminal: bool,
+    previous_line_count: int = 0,
+) -> int:
+    """TTY에서는 짧은 여러 행을 제자리 갱신하고 redirected output에는 그대로 기록한다."""
+    if terminal:
+        if previous_line_count:
+            sys.stdout.write(f"\033[{previous_line_count}A")
+        for line in lines:
+            sys.stdout.write(f"\r\033[2K{line}\n")
+        sys.stdout.flush()
+    else:
+        print("\n".join(lines), flush=True)
+    return len(lines)
+
+
+def _monitor_progress(
+    processes: list[multiprocessing.Process],
+    progress_queue: Any,
+    workers: dict[int, WorkerProgress],
+    total_trials: int,
+    samples_per_trial: int,
+    started_at: float,
+) -> None:
+    """child event를 모아 전체 및 worker별 진행상황을 주기적으로 표시한다."""
+    terminal = sys.stdout.isatty()
+    refresh_interval = 1.0 if terminal else 10.0
+    last_refresh = 0.0
+    rendered_line_count = 0
+    while any(process.is_alive() for process in processes):
+        try:
+            event = progress_queue.get(timeout=0.2)
+            _apply_progress_event(workers, event)
+        except Empty:
+            pass
+        while True:
+            try:
+                _apply_progress_event(workers, progress_queue.get_nowait())
+            except Empty:
+                break
+        now = time.monotonic()
+        if now - last_refresh >= refresh_interval:
+            rendered_line_count = _show_progress(
+                _progress_lines(
+                    workers,
+                    total_trials,
+                    samples_per_trial,
+                    started_at,
+                    now,
+                ),
+                terminal=terminal,
+                previous_line_count=rendered_line_count,
+            )
+            last_refresh = now
+    for process in processes:
+        process.join()
+    while True:
+        try:
+            _apply_progress_event(workers, progress_queue.get_nowait())
+        except Empty:
+            break
+    for worker_id, process in enumerate(processes):
+        worker = workers[worker_id]
+        if process.exitcode not in {0, None} and worker.state != "crashed":
+            worker.state = "failed"
+            if not worker.error:
+                worker.error = f"process exit code {process.exitcode}"
+                worker.error_log_path = worker.log_path
+    _show_progress(
+        _progress_lines(
+            workers,
+            total_trials,
+            samples_per_trial,
+            started_at,
+            time.monotonic(),
+        ),
+        terminal=terminal,
+        previous_line_count=rendered_line_count,
+    )
+    for worker in workers.values():
+        if worker.error:
+            log_detail = (
+                f" log={worker.error_log_path}" if worker.error_log_path else ""
+            )
+            print(f"[error] worker {worker.worker_id}: {worker.error}{log_detail}")
+
+
 def _run_worker(
     args: argparse.Namespace,
     parent_run_id: str,
     worker_id: int,
     trial_indices: list[int],
+    progress_queue: Any | None = None,
 ) -> int:
     """한 worker의 격리 설정으로 할당된 trial을 순차 실행한다."""
     args.worker_ros_domain_id = args.ros_domain_id_base + worker_id
     args.worker_zenoh_port = args.zenoh_port_base + worker_id
     args.worker_gz_partition = f"phy_{parent_run_id}_w{worker_id:02d}"
     run_id = f"{parent_run_id}-w{worker_id:02d}-{os.getpid()}"
-    ctx = _create_run_context(args, run_id)
-    print(
-        f"[worker {worker_id}] trials={trial_indices}, "
-        f"ROS_DOMAIN_ID={args.worker_ros_domain_id}, "
-        f"zenoh_port={args.worker_zenoh_port}, partition={args.worker_gz_partition}"
+    ctx = _create_run_context(
+        args,
+        run_id,
+        progress_queue=progress_queue,
+        worker_id=worker_id,
+    )
+    _emit_progress(
+        progress_queue,
+        "worker_started",
+        worker_id,
     )
     failed_indices: list[int] = []
     try:
         for index in trial_indices:
             rng = random.Random(args.seed + index * 1_000_003)
+            log_path = _trial_log_path(
+                args,
+                parent_run_id,
+                worker_id,
+                index,
+            )
+            _emit_progress(
+                progress_queue,
+                "trial_started",
+                worker_id,
+                trial_index=index,
+                log_path=str(log_path),
+            )
             try:
-                _run_trial(ctx, index, rng)
+                with _trial_output(args, log_path):
+                    _run_trial(ctx, index, rng)
             except RuntimeError as exc:
                 failed_indices.append(index)
-                print(f"[error] trial {index} failed: {exc}; continuing worker")
+                _emit_progress(
+                    progress_queue,
+                    "trial_failed",
+                    worker_id,
+                    trial_index=index,
+                    error=f"trial_{index:03d}: {exc}",
+                )
+                if progress_queue is None:
+                    print(f"[error] trial {index} failed: {exc}; continuing worker")
+            else:
+                _emit_progress(
+                    progress_queue,
+                    "trial_completed",
+                    worker_id,
+                    trial_index=index,
+                )
     except KeyboardInterrupt:
-        print("\n[interrupt] cleaning collector-owned process groups...")
-        _cleanup_interrupted_run(ctx)
+        with _trial_output(
+            args,
+            _run_log_dir(args, parent_run_id)
+            / f"worker_{worker_id:02d}"
+            / "interrupt_cleanup.log",
+        ):
+            _cleanup_interrupted_run(ctx)
         return 130
     finally:
         _persist_groups(ctx)
+    _emit_progress(progress_queue, "worker_finished", worker_id)
     if failed_indices:
-        print(f"[error] worker {worker_id} failed trials: {failed_indices}")
+        if progress_queue is None:
+            print(f"[error] worker {worker_id} failed trials: {failed_indices}")
         return 1
     return 0
 
@@ -504,9 +835,26 @@ def _worker_entry(
     parent_run_id: str,
     worker_id: int,
     trial_indices: list[int],
+    progress_queue: Any,
 ) -> None:
     """multiprocessing child의 exit code를 worker 결과와 일치시킨다."""
-    raise SystemExit(_run_worker(args, parent_run_id, worker_id, trial_indices))
+    try:
+        result = _run_worker(
+            args,
+            parent_run_id,
+            worker_id,
+            trial_indices,
+            progress_queue,
+        )
+    except Exception as exc:
+        _emit_progress(
+            progress_queue,
+            "worker_crashed",
+            worker_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        result = 1
+    raise SystemExit(result)
 
 
 def _worker_trial_indices(total: int, workers: int, worker_id: int) -> list[int]:
@@ -517,21 +865,34 @@ def _worker_trial_indices(total: int, workers: int, worker_id: int) -> list[int]
 def _run_parallel(args: argparse.Namespace, parent_run_id: str) -> int:
     """trial을 worker별 round-robin 분배하고 모든 child 완료를 기다린다."""
     process_context = multiprocessing.get_context("spawn")
+    progress_queue = process_context.Queue()
     processes: list[multiprocessing.Process] = []
+    workers = {
+        worker_id: WorkerProgress(worker_id=worker_id)
+        for worker_id in range(args.workers)
+    }
+    started_at = time.monotonic()
+    print(f"[logs] {_run_log_dir(args, parent_run_id)}")
     try:
         for worker_id in range(args.workers):
             indices = _worker_trial_indices(args.trials, args.workers, worker_id)
             process = process_context.Process(
                 target=_worker_entry,
-                args=(args, parent_run_id, worker_id, indices),
+                args=(args, parent_run_id, worker_id, indices, progress_queue),
                 name=f"phy-collector-{worker_id}",
             )
             process.start()
             processes.append(process)
             if worker_id + 1 < args.workers:
                 time.sleep(max(0.0, args.worker_start_delay_s))
-        for process in processes:
-            process.join()
+        _monitor_progress(
+            processes,
+            progress_queue,
+            workers,
+            args.trials,
+            args.samples_per_trial,
+            started_at,
+        )
     except KeyboardInterrupt:
         print("\n[interrupt] stopping parallel collection workers...")
         for process in processes:
@@ -542,6 +903,9 @@ def _run_parallel(args: argparse.Namespace, parent_run_id: str) -> int:
             if process.is_alive():
                 process.terminate()
         return 130
+    finally:
+        progress_queue.close()
+        progress_queue.join_thread()
     failed = [process for process in processes if process.exitcode != 0]
     if failed:
         print(
@@ -565,7 +929,10 @@ def _finalize_dataset(args: argparse.Namespace) -> int:
     summary_path.write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    print(
+        f"[summary] trials={summary['trials']} captures={summary['captures']} "
+        f"images={summary['images']} output={output_dir}"
+    )
     if summary["trial_split_leaks"]:
         print("[error] trial split leakage detected")
         return 1
@@ -614,7 +981,7 @@ def main() -> int:
     parent_run_id = f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     result = (
         _run_worker(args, parent_run_id, 0, list(range(args.trials)))
-        if args.workers == 1
+        if args.dry_run
         else _run_parallel(args, parent_run_id)
     )
     if result != 0 or args.dry_run:
