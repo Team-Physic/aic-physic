@@ -17,6 +17,7 @@ from pathlib import Path
 
 from phy_data_collection.cli import parse_args
 from phy_data_collection.constants import (
+    COLLECTION_POLICY_MODULES,
     CONFIG_DIR,
     MIN_CLEARANCE_MM,
     REGISTRY_FILENAME,
@@ -386,6 +387,27 @@ def _prepare_args(args: argparse.Namespace) -> None:
             f"base-z-offset-mm must be at least {MIN_CLEARANCE_MM:g}mm "
             "to prevent plug-port contact"
         )
+    if args.board_distance_min_mm < args.base_z_offset_mm:
+        raise ValueError("board-distance-min-mm must preserve base-z-offset-mm clearance")
+    if args.board_distance_max_mm < args.board_distance_min_mm:
+        raise ValueError("board-distance-max-mm must be at least board-distance-min-mm")
+    if args.descent_start_distance_mm < args.base_z_offset_mm:
+        raise ValueError("descent-start-distance-mm must preserve base-z-offset-mm clearance")
+    if min(
+        args.board_lateral_limit_mm,
+        args.board_angle_limit_deg,
+        args.descent_lateral_limit_mm,
+        args.descent_angle_limit_deg,
+        args.visibility_margin_px,
+        args.board_visibility_margin_px,
+    ) < 0.0:
+        raise ValueError("policy limits and visibility margins must be non-negative")
+    if not 1 <= args.min_visible_cameras <= 3:
+        raise ValueError("min-visible-cameras must be in [1, 3]")
+    if not 1 <= args.board_min_visible_cameras <= 3:
+        raise ValueError("board-min-visible-cameras must be in [1, 3]")
+    if not args.policy.strip():
+        args.policy = COLLECTION_POLICY_MODULES[args.collection_policy]
     if args.ros_domain_id_base < 0 or args.ros_domain_id_base + args.workers - 1 > 232:
         raise ValueError("worker ROS domain IDs must be in [0, 232]")
     if args.zenoh_port_base < 1024 or args.zenoh_port_base + args.workers - 1 > 65535:

@@ -9,8 +9,8 @@ from typing import Any
 from .constants import (
     BOOLEAN_METAVAR,
     CLI_DEFAULTS,
+    COLLECTION_POLICY_CHOICES,
     ENGINE_SETUP,
-    POLICY_MODULE,
     PORT_ORDER_CHOICES,
     TRIAL_TIMEOUT_GRACE_S,
 )
@@ -59,7 +59,12 @@ def _add_trial_args(parser: argparse.ArgumentParser) -> None:
     _add_argument(parser, "zenoh_port_base", type=int)
     _add_argument(parser, "worker_start_delay_s", type=float)
     parser.add_argument("--engine-setup", default=ENGINE_SETUP)
-    parser.add_argument("--policy", default=POLICY_MODULE)
+    _add_argument(parser, "collection_policy", choices=COLLECTION_POLICY_CHOICES)
+    parser.add_argument(
+        "--policy",
+        default="",
+        help="Expert override for the ROS policy module selected by --collection-policy.",
+    )
     _add_argument(parser, "policy_start_wait_s", type=float)
     _add_argument(parser, "robot_joint_noise_deg", type=float)
     _add_argument(parser, "cable_rpy_noise_deg", type=float)
@@ -111,10 +116,19 @@ def _add_pose_args(parser: argparse.ArgumentParser) -> None:
         "yaw_max_deg",
         "rpy_norm_max_rad",
         "base_z_offset_mm",
+        "board_distance_min_mm",
+        "board_distance_max_mm",
+        "board_lateral_limit_mm",
+        "board_angle_limit_deg",
+        "descent_start_distance_mm",
+        "descent_lateral_limit_mm",
+        "descent_angle_limit_deg",
         "visibility_margin_px",
+        "board_visibility_margin_px",
     ):
         _add_argument(parser, name, type=float)
     _add_argument(parser, "min_visible_cameras", type=int)
+    _add_argument(parser, "board_min_visible_cameras", type=int)
     _add_argument(parser, "sampling_tiers_mm")
     _add_argument(parser, "sampling_tier_weights")
 

@@ -1,7 +1,7 @@
 # phy_data_collection
 
-랜덤화된 AIC 시뮬레이션에서 `phy_policy.ros.PortOffsetCollect`를 실행해 img2pos
-학습 데이터를 수집하고 품질을 평가하는 ROS 2 Python 패키지입니다. 수집 runner는
+랜덤화된 AIC 시뮬레이션에서 거리 구간별 collection policy를 실행해 img2pos 학습
+데이터를 수집하고 품질을 평가하는 ROS 2 Python 패키지입니다. 수집 runner는
 trial별 pose 수렴 후 이미지를 저장하며, 여러 headless simulator를 격리해 병렬 실행할
 수 있습니다.
 
@@ -14,6 +14,7 @@ cd ws_aic/src
 
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
+  --collection-policy near-port \
   --trials 100 \
   --workers 2 \
   --samples-per-trial 40 \
@@ -37,8 +38,8 @@ pixi reinstall --frozen ros-kilted-phy-policy ros-kilted-phy-data-collection
 trial config·world 랜덤화
   → Distrobox에서 Gazebo/AIC engine 시작
   → 선택 시 rosbag 시작
-  → host Pixi 환경에서 PortOffsetCollect 시작
-  → lift-up → ground-truth approach → 20mm 안전거리 밖의 50/10/5/2mm tier pose 순회
+  → host Pixi 환경에서 선택한 collection policy 시작
+  → 정책별 거리·횡방향 위치·카메라 각도 pose 순회
   → controller가 limit 적용 후 수락한 reference pose가 멈추고 실제 TCP의 frame 간
     이동량이 연속 frame에서 허용 범위 안으로 수렴할 때까지 대기
   → 새 camera frame과 같은 시각의 plug TF 검증
@@ -66,6 +67,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--trials` | `100` | 실행할 독립 trial 수 |
 | `--workers` | `1` | 동시에 실행할 격리 simulator 수 |
 | `--samples-per-trial` | `40` | trial마다 저장할 capture 수 |
+| `--collection-policy` | `near-port` | `board-view`, `descent`, `near-port` 중 선택 |
 | `--port-types` | `sfp,sc` | 수집할 connector 종류 |
 | `--port-order` | `round_robin` | connector 선택 순서; `random` 가능 |
 | `--dataset-version` | 자동 생성 | `ws_aic/data/img2pos/` 아래 새 version 경로 |
@@ -100,6 +102,16 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 
 ### Pose 분포
 
+| 정책 | 동작 |
+| --- | --- |
+| `board-view` | center camera optical axis가 보드 중앙을 향하도록 750~850mm 거리에서 횡방향 위치와 각도를 무작위화하고, 보드 외곽 네 점이 영상 안에 있는 capture만 저장 |
+| `descent` | 선택 포트를 향해 550mm부터 20mm 안전거리까지 먼 순서로 내려오며 거리·횡방향 위치·각도를 무작위화 |
+| `near-port` | 기존 20mm 안전거리 기준 50/10/5/2mm coarse/near tier를 수집 |
+
+`board-view`에서 NIC card 데이터를 수집하려면 `--port-types sfp`를 사용합니다. 공식 AIC
+task board에는 `nic_rail_0`부터 `nic_rail_4`까지 총 5개 rail이 있으며, runner는 매 5개
+SFP trial에서 모든 rail을 한 번씩 무작위 순서로 배정합니다.
+
 | 옵션 | 기본값 | 설명 |
 | --- | ---: | --- |
 | `--dx-min-mm`, `--dx-max-mm` | `-50`, `50` | port-local X 범위 |
@@ -112,7 +124,13 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--port-yaw-limit-deg` | `35` | 대칭 yaw 범위 |
 | `--roll-min-deg` … `--yaw-max-deg` | 미지정 | 비대칭 RPY 범위 override |
 | `--rpy-norm-max-rad` | 미지정 | 생성된 RPY vector norm 상한 |
-| `--base-z-offset-mm` | `20` | 모든 collect target이 유지할 접근축 최소 안전거리 |
+| `--base-z-offset-mm` | `20` | descent/near-port가 유지할 접근축 최소 안전거리 |
+| `--board-distance-min-mm`, `--board-distance-max-mm` | `750`, `850` | board-view center camera optical 거리 범위 |
+| `--board-lateral-limit-mm` | `30` | board-view camera-plane X/Y 대칭 범위 |
+| `--board-angle-limit-deg` | `15` | board-view RPY 대칭 범위 |
+| `--descent-start-distance-mm` | `550` | descent 시작 거리 |
+| `--descent-lateral-limit-mm` | `40` | descent port-local X/Y 대칭 범위 |
+| `--descent-angle-limit-deg` | `20` | descent RPY 대칭 범위 |
 
 기본 40 capture는 각 tier에 10개씩 배정됩니다. X/Y는 `±tier`, Z는 20mm 최소
 안전거리에 `0~tier`를 더하고 RPY 범위도 tier 비율로 축소합니다. 첫 sample의 추가
@@ -127,7 +145,9 @@ translation과 RPY는 모두 0이지만 port와의 안전거리 20mm는 유지�
 | --- | ---: | --- |
 | `--min-visible-cameras` | `2` | 저장에 필요한 최소 가시 camera 수 |
 | `--visibility-margin-px` | `64` | 영상 경계에서 제외할 여백 |
-| `--sync-tolerance-ms` | `30` | camera/controller/동적 TF 최대 시각 차이 |
+| `--board-min-visible-cameras` | `1` | board-view에서 보드 전체가 보여야 하는 최소 camera 수 |
+| `--board-visibility-margin-px` | `32` | board-view 보드 외곽과 영상 경계 사이 최소 여백 |
+| `--sync-tolerance-ms` | `30` | capture stamp와 controller/동적 TF 최대 시각 차이 |
 | `--sync-wait-timeout-s` | `1` | 새 Observation과 capture 시각 TF 대기시간 |
 | `--settle-timeout-s` | `8` | reference와 실제 TCP 움직임 수렴 제한시간 |
 | `--settle-position-tolerance-mm` | `1` | 연속 controller frame 간 TCP 위치 이동 허용량 |
@@ -135,26 +155,30 @@ translation과 RPY는 모두 0이지만 port와의 안전거리 20mm는 유지�
 | `--settle-stable-observations` | `3` | 연속으로 통과해야 하는 서로 다른 controller frame 수 |
 | `--capture-attempt-multiplier` | `2` | 각 sample의 capture 시도 상한 |
 
-center image의 `header.stamp`를 capture 시각으로 사용합니다. 세 image와 controller가
-허용 오차 안에 있고, 해당 시각의 plug TF를 조회할 수 있으며, port가 지정 개수 이상의
-camera에 보이고 촬영 시점의 실제 TF를 port-local 좌표로 변환한 뒤 20mm 안전거리를
-제외한 offset이 배정된 sampling tier 안에 있을 때만 저장합니다. 명령 직후 frame은
+세 image의 `header.stamp`가 정확히 같고 controller가 허용 오차 안에 있는 Observation만
+사용합니다. 공통 capture stamp로 plug TF를 한 번 조회하여 하나의 `target_xyz_m`을
+계산합니다.
+port 또는 board가 지정 개수 이상의 camera에 보일 때만 저장합니다. `descent`와
+`near-port`는 실제 TF의 접근축 거리가 20mm 이상인지 검사하고, `near-port`는 추가로
+20mm 안전거리를 제외한 port-local offset이 배정된 sampling tier 안에 있는지도
+검사합니다. 명령 직후 frame은
 사용하지 않고 controller reference와 실제 TCP 움직임이 수렴한 이후의 다음 camera
 frame을 선택합니다. 조건을 통과하지 못한 tier는 재시도하며 목표 capture 수를 채우지
 못한 trial은 실패 처리합니다.
 
 임피던스 제어에서는 외력과 유한 stiffness 때문에 reference와 실제 TCP 사이에
 정상상태 tracking error가 남을 수 있습니다. 이 값은 log 진단용으로만 기록하고 동작
-완료 조건으로 사용하지 않으며, 실제 TF label의 tier 검사가 최종 sample 정확도를
-보장합니다.
+완료 조건으로 사용하지 않습니다. 대신 실제 TF label을 저장하고, `descent`와
+`near-port`의 최소거리 검사 및 `near-port`의 tier 검사가 최종 sample 정확도와
+안전거리를 보장합니다.
 
-`collection_summary.json`의 `actual_sampling_offset_box_coverage_mm`은 촬영 시점 TF를
-기준으로 안전거리를 제외한 실제 port-local offset이 각 ±2/5/10/50mm box 안에 들어온
-capture 수와 비율입니다. `target_xyz_m`에는 추론과 제어에 필요한 안전거리까지 포함된
-`base_link` correction을 그대로 저장합니다.
+`collection_summary.json`의 `near_port_sampling_offset_box_coverage_mm`은 `near-port`
+capture만 대상으로, 촬영 시점 TF에서 안전거리를 제외한 실제 port-local offset이 각
+±2/5/10/50mm box 안에 들어온 수와 비율입니다. `target_xyz_m`에는 추론과 제어에 필요한
+안전거리까지 포함된 `base_link` correction을 그대로 저장합니다.
 
-port는 trial 동안 고정되므로 시작 시 한 번 snapshot하고, 움직이는 plug만 center image
-시각으로 조회합니다. 학습 row에는 `capture_stamp_ns`와 승인 source 중 가장 큰
+port는 trial 동안 고정되므로 시작 시 한 번 snapshot하고, 움직이는 plug는 공통 capture
+시각으로 조회합니다. 학습 row에는 하나의 `capture_stamp_ns`와 승인 source 중 가장 큰
 `max_sync_skew_ns`만 남기며 상세 원본 이벤트는 선택적 rosbag으로 보관합니다.
 
 ### Hugging Face
@@ -191,21 +215,23 @@ ws_aic/data/img2pos/<version>/
     └── test/<left|center|right>/*.jpg
 ```
 
-한 JSONL row는 한 camera image에 대응합니다.
+한 JSONL row는 동일한 `capture_stamp_ns`를 공유하는 동기화 capture 하나에 대응합니다.
 
 | 필드 | 의미 |
 | --- | --- |
-| `id`, `capture_id` | image와 동시 capture 식별자 |
+| `id` | 동기화 capture 식별자 |
 | `trial_id`, `split` | trial 식별자와 trial 단위 train/val/test 분할 |
-| `image`, `camera`, `connector` | JPEG 상대 경로와 입력 구분 |
-| `target_xyz_m` | `base_link`의 `port_entrance - plug_reference` correction |
+| `images`, `connector` | camera 이름을 key로 갖는 JPEG 상대 경로 mapping과 connector 구분 |
+| `collection_policy` | `board-view`, `descent`, `near-port` 수집 구간 |
+| `target_xyz_m` | 공통 촬영 시점 `base_link`의 `port_entrance - plug_reference` correction |
 | `sampling_offset_xyz_m` | 최소 안전거리를 제외한 실제 port-local XYZ; tier 분포 감사용 |
-| `sampling_tier_mm` | 해당 capture에 배정된 coarse/near tier |
-| `capture_stamp_ns` | center image 촬영 ROS 시각 |
+| `sampling_tier_mm` | near-port capture의 coarse/near tier; 다른 정책은 `null` |
+| `view_distance_m` | 촬영 시점 plug와 port 사이 접근축 거리 |
+| `capture_stamp_ns` | 묶인 camera images의 공통 촬영 ROS 시각 |
 | `max_sync_skew_ns` | 승인 source들의 최대 시각 차이 |
 | `settle_*` | 촬영 전 연속 controller frame 간 최종 TCP 이동량과 대기시간 |
 
-같은 trial의 모든 camera와 capture는 같은 split에 배정됩니다. 기본 100 trial은 정확히
+같은 trial의 모든 capture는 같은 split에 배정됩니다. 기본 100 trial은 정확히
 70 train, 15 validation, 15 test로 배정됩니다. command pose, RPY,
 scenario, projection, 전체 TF는 img2pos 입력·정답이 아니므로 dataset에 중복 저장하지
 않습니다.
@@ -234,8 +260,9 @@ prediction coverage, `XYZ MAE(mm)`, `3D error p95(mm)`, `5mm 이내 비율`을 �
 | `scenario.make_trial_config()` | task board, cable, robot 초기 조건 생성 |
 | `world.write_randomized_world()` | 조명과 배경 world 생성 |
 | `runtime._policy_environment()` | img2pos·pose·동기화 설정 전달 |
-| `PortOffsetCollect.insert_cable()` | lift-up, approach, collect 단계 실행 |
-| `motion.collect()` | pose 이동과 촬영 시점 TF 조회 |
+| `PortOffsetCollect.insert_cable()` | 선택 정책에 맞춰 lift-up, approach, collect 단계 구성 |
+| `motion.build_samples()` | 정책별 거리·위치·각도 분포 생성 |
+| `motion.collect()` | pose 이동과 공통 capture 시점 TF 조회 |
 | `motion.wait_for_pose_convergence()` | controller reference와 실제 TCP 움직임 정지 판정 |
 | `dataset.wait_for_observation()` | 현재 명령보다 새로운 동기화 Observation 선택 |
 | `dataset.target_xyz()` | 촬영 시점의 XYZ correction 계산 |

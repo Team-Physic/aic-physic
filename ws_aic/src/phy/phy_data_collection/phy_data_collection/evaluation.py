@@ -55,19 +55,26 @@ def summarize_dataset(dataset_dir: Path) -> dict[str, Any]:
     rows = _read_jsonl(samples_path)
     captures: dict[str, dict[str, Any]] = {}
     trial_splits: dict[str, set[str]] = defaultdict(set)
+    image_counts_by_split: Counter[str] = Counter()
+    image_counts_by_camera: Counter[str] = Counter()
     for row in rows:
-        capture_id = str(row["capture_id"])
-        existing = captures.setdefault(capture_id, row)
-        if (
-            existing["split"] != row["split"]
-            or existing["target_xyz_m"] != row["target_xyz_m"]
-            or existing.get("sampling_offset_xyz_m")
-            != row.get("sampling_offset_xyz_m")
-        ):
-            raise ValueError(f"capture metadata mismatch: {capture_id}")
+        capture_id = str(row["id"])
+        if capture_id in captures:
+            raise ValueError(f"duplicate capture row: {capture_id}")
+        images = row.get("images")
+        if not isinstance(images, dict) or not images:
+            raise ValueError(f"{capture_id}: invalid images mapping")
+        captures[capture_id] = row
+        image_counts_by_split[str(row["split"])] += len(images)
+        image_counts_by_camera.update(str(camera) for camera in images)
         trial_splits[str(row["trial_id"])].add(str(row["split"]))
 
     labels = [_vector(row, "target_xyz_m") for row in captures.values()]
+    near_port_captures = [
+        row
+        for row in captures.values()
+        if row.get("collection_policy", "near-port") == "near-port"
+    ]
     sampling_offsets = [
         _vector(
             row,
@@ -75,7 +82,7 @@ def summarize_dataset(dataset_dir: Path) -> dict[str, Any]:
             if "sampling_offset_xyz_m" in row
             else "target_xyz_m",
         )
-        for row in captures.values()
+        for row in near_port_captures
     ]
     norms_mm = [math.sqrt(sum(value * value for value in label)) * 1000.0 for label in labels]
     axis_mm = [[label[index] * 1000.0 for label in labels] for index in range(3)]
@@ -98,18 +105,27 @@ def summarize_dataset(dataset_dir: Path) -> dict[str, Any]:
         for threshold in (2, 5, 10, 50)
     }
     summary = {
-        "image_rows": len(rows),
+        "capture_rows": len(rows),
+        "images": sum(image_counts_by_camera.values()),
         "captures": len(captures),
         "trials": len(trial_splits),
         "trial_split_leaks": sum(len(splits) != 1 for splits in trial_splits.values()),
-        "images_by_split": dict(Counter(str(row["split"]) for row in rows)),
+        "images_by_split": dict(image_counts_by_split),
         "captures_by_split": dict(Counter(str(row["split"]) for row in captures.values())),
-        "images_by_camera": dict(Counter(str(row["camera"]) for row in rows)),
+        "images_by_camera": dict(image_counts_by_camera),
         "captures_by_connector": dict(
             Counter(str(row["connector"]) for row in captures.values())
         ),
+        "captures_by_collection_policy": dict(
+            Counter(str(row.get("collection_policy", "unknown")) for row in captures.values())
+        ),
         "captures_by_sampling_tier_mm": dict(
-            Counter(str(row.get("sampling_tier_mm", "unknown")) for row in captures.values())
+            Counter(
+                "not_applicable"
+                if row.get("sampling_tier_mm") is None
+                else str(row["sampling_tier_mm"])
+                for row in captures.values()
+            )
         ),
         "target_xyz_mm": {
             axis: {
@@ -119,7 +135,7 @@ def summarize_dataset(dataset_dir: Path) -> dict[str, Any]:
             }
             for axis, values in zip(("x", "y", "z"), axis_mm, strict=True)
         },
-        "actual_sampling_offset_box_coverage_mm": box_coverage,
+        "near_port_sampling_offset_box_coverage_mm": box_coverage,
         "target_3d_norm_mm": {
             "p95": _percentile(norms_mm, 95.0),
         },

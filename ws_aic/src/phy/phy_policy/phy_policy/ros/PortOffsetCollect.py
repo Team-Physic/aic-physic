@@ -108,6 +108,8 @@ def _dataset_dir() -> Path:
 class PortOffsetCollect(Policy):
     """GT TF로 camera image와 port-minus-plug XYZ label을 수집한다."""
 
+    collection_policy = "near-port"
+
     def __init__(self, parent_node):
         """현재 img2pos 수집에 필요한 설정과 ROS 실행 상태만 초기화한다."""
         os.environ.setdefault("AIC_COLLECT_STEPS", "1000")
@@ -147,6 +149,35 @@ class PortOffsetCollect(Policy):
         seed = os.environ.get("AIC_COLLECT_RANDOM_SEED", "").strip()
         self.rng = np.random.default_rng(int(seed) if seed else None)
         self.planner = motion.Planner()
+        self.board_distance_range = (
+            max(
+                self.base_z_offset,
+                _env_float("AIC_BOARD_VIEW_DISTANCE_MIN_M", 0.750),
+            ),
+            max(
+                self.base_z_offset,
+                _env_float("AIC_BOARD_VIEW_DISTANCE_MAX_M", 0.850),
+            ),
+        )
+        self.board_distance_range = tuple(sorted(self.board_distance_range))
+        self.board_lateral_limit = max(
+            0.0, _env_float("AIC_BOARD_VIEW_LATERAL_LIMIT_M", 0.030)
+        )
+        self.board_angle_limit = max(
+            0.0,
+            np.deg2rad(_env_float("AIC_BOARD_VIEW_ANGLE_LIMIT_DEG", 15.0)),
+        )
+        self.descent_start_distance = max(
+            self.base_z_offset,
+            _env_float("AIC_DESCENT_START_DISTANCE_M", 0.550),
+        )
+        self.descent_lateral_limit = max(
+            0.0, _env_float("AIC_DESCENT_LATERAL_LIMIT_M", 0.040)
+        )
+        self.descent_angle_limit = max(
+            0.0,
+            np.deg2rad(_env_float("AIC_DESCENT_ANGLE_LIMIT_DEG", 20.0)),
+        )
 
         self.dataset_dir = Path(
             os.environ.setdefault("AIC_IMG2POS_DATASET_DIR", str(_dataset_dir()))
@@ -160,6 +191,14 @@ class PortOffsetCollect(Policy):
         self.trial_split = os.environ.get("AIC_IMG2POS_TRIAL_SPLIT", "").strip().lower()
         self.visibility_margin_px = _env_float("AIC_IMG2POS_VISIBILITY_MARGIN_PX", 64.0)
         self.min_visible_cameras = max(1, int(os.environ.get("AIC_IMG2POS_MIN_VISIBLE_CAMERAS", "2")))
+        self.board_visibility_margin_px = max(
+            0.0,
+            _env_float("AIC_IMG2POS_BOARD_VISIBILITY_MARGIN_PX", 32.0),
+        )
+        self.board_min_visible_cameras = max(
+            1,
+            int(os.environ.get("AIC_IMG2POS_BOARD_MIN_VISIBLE_CAMERAS", "1")),
+        )
         self.capture_count = 0
         self.record = _env_bool("AIC_IMG2POS_RECORD", True)
         xy_limit = _env_float("AIC_PORT_COLLECT_XY_LIMIT_MM", 50.0) / 1000.0
@@ -208,7 +247,8 @@ class PortOffsetCollect(Policy):
         self.stop_file = Path(os.environ.get("AIC_STOP_FILE", "/tmp/aic_policy_stop"))
         threading.Thread(target=self._watch_stop_file, daemon=True).start()
         self.get_logger().info(
-            f"[PortOffsetCollect] Ready: steps={self.collect_steps}, "
+            f"[PortOffsetCollect] Ready: policy={self.collection_policy}, "
+            f"steps={self.collect_steps}, "
             f"dataset={self.dataset_dir}, split={self.trial_split or 'hash'}"
         )
 
@@ -276,6 +316,13 @@ class PortOffsetCollect(Policy):
                 return frame
         return candidates[0]
 
+    def _board_frame(self) -> str | None:
+        """전체 보드 가시성 검사에 사용할 task board base frame을 찾는다."""
+        for frame in ("task_board/task_board_base_link", "task_board_base_link"):
+            if self._wait_for_tf("base_link", frame, 0.5):
+                return frame
+        return None
+
     def set_pose_target(self, move_robot, pose, stiffness=None, damping=None) -> int:
         """controller에 pose 명령을 보내고 발행 ROS 시각을 nanosecond로 반환한다."""
         stiffness = stiffness or motion.STIFFNESS
@@ -308,6 +355,7 @@ class PortOffsetCollect(Policy):
             "status": status,
             "detail": detail,
             "mode": "img2pos",
+            "collection_policy": self.collection_policy,
             "lift_up_steps": counts["lift_up"],
             "approach_steps": counts["approach"],
             "collect_steps": counts["collect"],
@@ -353,20 +401,40 @@ class PortOffsetCollect(Policy):
         except TransformException as exc:
             return self._finish(episode_dir, task, counts, "port_tf_snapshot_failed", str(exc))
 
+        board_snapshot = None
+        if self.collection_policy == "board-view":
+            board_frame = self._board_frame()
+            if board_frame is None:
+                return self._finish(
+                    episode_dir, task, counts, "board_tf_unavailable"
+                )
+            try:
+                board_snapshot = self.lookup_latest_stamped("base_link", board_frame)
+            except TransformException as exc:
+                return self._finish(
+                    episode_dir, task, counts, "board_tf_snapshot_failed", str(exc)
+                )
+
         context = {
             "task": task,
             "episode_name": episode_name,
             "counts": counts,
             "port_snapshot": port_snapshot,
+            "board_snapshot": board_snapshot,
             "cable_tip_frame": cable_tip_frame,
             "plug_offset": dataset.plug_reference_offset(task, cable_tip_frame),
             **motion.control_for(task),
         }
-        for name, stage in (
-            ("lift_up", motion.lift),
-            ("approach", motion.approach),
-            ("collect", motion.collect),
-        ):
+        stages = {
+            "board-view": (("lift_up", motion.lift), ("collect", motion.collect)),
+            "descent": (("lift_up", motion.lift), ("collect", motion.collect)),
+            "near-port": (
+                ("lift_up", motion.lift),
+                ("approach", motion.approach),
+                ("collect", motion.collect),
+            ),
+        }[self.collection_policy]
+        for name, stage in stages:
             self.get_logger().info(f"[PortOffsetCollect] stage start: {name}")
             if not stage(self, context, get_observation, move_robot):
                 return self._finish(episode_dir, task, counts, f"{name}_failed")

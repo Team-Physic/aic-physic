@@ -20,6 +20,12 @@ from phy_policy.data_generator.geometry import pose_matrix, quaternion_matrix
 
 
 SFP_REFERENCE_OFFSET = np.array([0.0, 0.0021125, 0.0], dtype=float)
+BOARD_CORNERS_LOCAL = (
+    (-0.150, -0.214, 0.012),
+    (-0.150, 0.214, 0.012),
+    (0.150, -0.214, 0.012),
+    (0.150, 0.214, 0.012),
+)
 
 
 def image_for_camera(observation, camera: str):
@@ -61,34 +67,77 @@ def _base_to_camera(policy, observation, camera: str) -> np.ndarray:
     return np.linalg.inv(base_tool0 @ policy._tool0_optical[camera])
 
 
-def _port_projection(policy, observation, camera: str, port_tf: Transform) -> dict[str, Any]:
-    """포트 위치가 지정 camera의 유효 영상 영역에 보이는지 검사한다."""
+def board_corners(board_tf: Transform) -> list[list[float]]:
+    """task board 외곽 네 점을 base_link 좌표로 변환한다."""
+    rotation = quaternion_matrix(
+        board_tf.rotation.x,
+        board_tf.rotation.y,
+        board_tf.rotation.z,
+        board_tf.rotation.w,
+    )
+    translation = np.array(
+        [board_tf.translation.x, board_tf.translation.y, board_tf.translation.z],
+        dtype=float,
+    )
+    return [
+        list(map(float, rotation @ np.asarray(point, dtype=float) + translation))
+        for point in BOARD_CORNERS_LOCAL
+    ]
+
+
+def _points_projection(
+    policy,
+    observation,
+    camera: str,
+    points_base: list[list[float]],
+) -> dict[str, Any]:
+    """모든 base_link 점이 지정 camera의 유효 영상 영역에 보이는지 검사한다."""
     message = image_for_camera(observation, camera)
     intrinsic = _camera_matrix(camera_info_for(observation, camera))
     if message is None or message.width == 0 or message.height == 0 or intrinsic is None:
         return {"visible": False, "reason": "missing_image_or_intrinsics"}
     try:
-        point_camera = _base_to_camera(policy, observation, camera) @ np.array(
-            [port_tf.translation.x, port_tf.translation.y, port_tf.translation.z, 1.0],
-            dtype=float,
-        )
+        base_to_camera = _base_to_camera(policy, observation, camera)
+        points_camera = [
+            base_to_camera @ np.array([*point, 1.0], dtype=float)
+            for point in points_base
+        ]
     except Exception as exc:
         return {"visible": False, "reason": f"camera_transform_error: {exc}"}
-    depth = float(point_camera[2])
-    if depth <= 1e-6:
-        return {"visible": False, "reason": "behind_camera", "depth_m": depth}
-    u = float(intrinsic[0, 0] * point_camera[0] / depth + intrinsic[0, 2])
-    v = float(intrinsic[1, 1] * point_camera[1] / depth + intrinsic[1, 2])
-    margin = policy.visibility_margin_px
+    margin = (
+        policy.board_visibility_margin_px
+        if len(points_base) > 1
+        else policy.visibility_margin_px
+    )
+    projections = []
+    for point_camera in points_camera:
+        depth = float(point_camera[2])
+        if depth <= 1e-6:
+            return {"visible": False, "reason": "behind_camera", "depth_m": depth}
+        u = float(intrinsic[0, 0] * point_camera[0] / depth + intrinsic[0, 2])
+        v = float(intrinsic[1, 1] * point_camera[1] / depth + intrinsic[1, 2])
+        projections.append({"u_px": u, "v_px": v, "depth_m": depth})
     return {
-        "visible": bool(
+        "visible": all(
             margin <= u < float(message.width) - margin
             and margin <= v < float(message.height) - margin
+            for u, v in (
+                (projection["u_px"], projection["v_px"])
+                for projection in projections
+            )
         ),
-        "u_px": u,
-        "v_px": v,
-        "depth_m": depth,
+        "points": projections,
     }
+
+
+def _port_projection(policy, observation, camera: str, port_tf: Transform) -> dict[str, Any]:
+    """포트 위치가 지정 camera의 유효 영상 영역에 보이는지 검사한다."""
+    return _points_projection(
+        policy,
+        observation,
+        camera,
+        [[port_tf.translation.x, port_tf.translation.y, port_tf.translation.z]],
+    )
 
 
 def _stamp_ns(stamp) -> int | None:
@@ -137,8 +186,8 @@ def observation_sync(policy, observation) -> tuple[bool, dict[str, Any]]:
         capture_stamp_ns=capture_stamp,
         skew_ns={"camera": int(camera_skew), "controller": int(controller_skew)},
     )
-    if camera_skew > policy.sync_tolerance_ns:
-        timestamps["rejection_reason"] = "camera_time_difference_exceeded"
+    if camera_skew != 0:
+        timestamps["rejection_reason"] = "camera_timestamp_mismatch"
         return False, timestamps
     if controller_skew > policy.sync_tolerance_ns:
         timestamps["rejection_reason"] = "controller_time_difference_exceeded"
@@ -322,32 +371,61 @@ def _dataset_write_lock(policy):
 def write_manifest(policy) -> None:
     """compact img2pos 데이터셋 schema를 data.yaml에 기록한다."""
     policy.dataset_dir.mkdir(parents=True, exist_ok=True)
-    content = "\n".join(
+    sampling = [
+        "sampling:",
+        f"  collection_policy: {policy.collection_policy}",
+        f"  minimum_clearance_mm: {policy.base_z_offset * 1000.0:g}",
+    ]
+    if policy.collection_policy == "board-view":
+        sampling.extend(
             [
-                "schema_version: 1",
-                "task: img2pos",
-                f"version: {policy.dataset_version or 'default'}",
-                "input: rgb_image",
-                "samples: samples.jsonl",
-                "image_layout: images/<split>/<camera>/*.jpg",
-                "cameras: [left, center, right]",
-                "target:",
-                "  name: correction_xyz",
-                "  definition: port_entrance - plug_reference",
-                "  frame: base_link",
-                "  unit: meter",
-                "split:",
-                "  group_by: trial_id",
-                f"  validation_ratio: {policy.val_ratio:.6f}",
-                f"  test_ratio: {policy.test_ratio:.6f}",
-                "sampling:",
-                f"  minimum_clearance_mm: {policy.base_z_offset * 1000.0:g}",
-                "  position_tiers_mm: ["
-                + ", ".join(f"{value * 1000.0:g}" for value in policy.sampling_tiers_m)
-                + "]",
-                "",
+                "  optical_distance_mm: "
+                f"[{policy.board_distance_range[0] * 1000.0:g}, "
+                f"{policy.board_distance_range[1] * 1000.0:g}]",
+                f"  lateral_limit_mm: {policy.board_lateral_limit * 1000.0:g}",
+                f"  angle_limit_deg: {np.rad2deg(policy.board_angle_limit):g}",
             ]
         )
+    elif policy.collection_policy == "descent":
+        sampling.extend(
+            [
+                "  approach_distance_mm: "
+                f"[{policy.descent_start_distance * 1000.0:g}, "
+                f"{policy.base_z_offset * 1000.0:g}]",
+                f"  lateral_limit_mm: {policy.descent_lateral_limit * 1000.0:g}",
+                f"  angle_limit_deg: {np.rad2deg(policy.descent_angle_limit):g}",
+            ]
+        )
+    else:
+        sampling.append(
+            "  position_tiers_mm: ["
+            + ", ".join(f"{value * 1000.0:g}" for value in policy.sampling_tiers_m)
+            + "]"
+        )
+    content = "\n".join(
+        [
+            "schema_version: 3",
+            "task: img2pos",
+            f"version: {policy.dataset_version or 'default'}",
+            "sample_unit: synchronized_capture",
+            "input: synchronized_rgb_images",
+            "samples: samples.jsonl",
+            "image_layout: images/<split>/<camera>/*.jpg",
+            "cameras: [left, center, right]",
+            "target:",
+            "  name: correction_xyz",
+            "  definition: port_entrance - plug_reference",
+            "  frame: base_link",
+            "  unit: meter",
+            "  timestamp: capture_stamp",
+            "split:",
+            "  group_by: trial_id",
+            f"  validation_ratio: {policy.val_ratio:.6f}",
+            f"  test_ratio: {policy.test_ratio:.6f}",
+            *sampling,
+            "",
+        ]
+    )
     with _dataset_write_lock(policy):
         temporary = policy.dataset_dir / f".data.yaml.{os.getpid()}.tmp"
         temporary.write_text(content, encoding="utf-8")
@@ -364,10 +442,11 @@ def save_sample(
     port_tf: Transform,
     timestamps: dict[str, Any],
     label_xyz: list[float],
-    sample: dict[str, float],
+    sample: dict[str, Any],
     settle: dict[str, float],
+    board_tf: Transform | None = None,
 ) -> tuple[bool, str]:
-    """가시 camera JPEG와 최소 img2pos JSONL row를 저장한다."""
+    """동일 촬영시각의 가시 camera JPEG와 단일 img2pos label을 저장한다."""
     if observation is None:
         return False, "Observation을 받지 못함"
     if not timestamps.get("sync_valid", False):
@@ -377,19 +456,44 @@ def save_sample(
         return False, "유효한 camera capture timestamp가 없음"
     if len(label_xyz) != 3 or not all(np.isfinite(float(value)) for value in label_xyz):
         return False, "유효한 XYZ correction label이 없음"
-    label_xyz = [float(value) for value in label_xyz]
-    visible = [
-        camera
+    visibility_points = board_corners(board_tf) if board_tf is not None else None
+    visibility = {
+        camera: (
+            _points_projection(
+                policy, observation, camera, visibility_points
+            )
+            if visibility_points is not None
+            else _port_projection(policy, observation, camera, port_tf)
+        )
         for camera in ("left", "center", "right")
-        if _port_projection(policy, observation, camera, port_tf).get("visible", False)
+    }
+    visible = [
+        camera for camera, result in visibility.items() if result.get("visible", False)
     ]
-    if len(visible) < policy.min_visible_cameras:
-        return False, f"포트 가시성 부족: visible={visible}, required={policy.min_visible_cameras}"
+    required_cameras = (
+        policy.board_min_visible_cameras
+        if board_tf is not None
+        else policy.min_visible_cameras
+    )
+    if len(visible) < required_cameras:
+        detail = {
+            camera: result.get("reason")
+            or [
+                [round(point["u_px"], 1), round(point["v_px"], 1)]
+                for point in result.get("points", ())
+            ]
+            for camera, result in visibility.items()
+        }
+        target = "보드" if board_tf is not None else "포트"
+        return False, (
+            f"{target} 가시성 부족: visible={visible}, "
+            f"required={required_cameras}, projection={detail}"
+        )
 
     trial_id = _trial_id(policy, episode_name)
     split = split_for_trial(policy, trial_id)
     capture_id = f"{episode_name}_collect_{step_idx:06d}"
-    records: list[dict[str, Any]] = []
+    images: dict[str, str] = {}
     written: list[Path] = []
     failures: list[str] = []
     for camera in visible:
@@ -397,47 +501,50 @@ def save_sample(
         if image is None:
             failures.append(f"{camera}: image 변환 실패")
             continue
-        sample_id = f"{capture_id}_{camera}"
-        path = policy.dataset_dir / "images" / split / camera / f"{sample_id}.jpg"
+        path = policy.dataset_dir / "images" / split / camera / f"{capture_id}_{camera}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
         if not cv2.imwrite(str(path), image):
             failures.append(f"{camera}: JPEG 저장 실패 ({path})")
             continue
         written.append(path)
-        records.append(
-            {
-                "id": sample_id,
-                "capture_id": capture_id,
-                "trial_id": trial_id,
-                "split": split,
-                "image": str(path.relative_to(policy.dataset_dir)),
-                "camera": camera,
-                "connector": _connector(task),
-                "target_xyz_m": label_xyz,
-                "sampling_offset_xyz_m": sample["actual_xyz_m"],
-                "sampling_tier_mm": float(sample["tier_m"] * 1000.0),
-                "capture_stamp_ns": capture_stamp,
-                "max_sync_skew_ns": _max_skew(timestamps),
-                "settle_position_error_mm": float(settle["position_error_m"] * 1000.0),
-                "settle_orientation_error_deg": float(
-                    np.rad2deg(settle["orientation_error_rad"])
-                ),
-                "settle_wait_ms": float(settle["wait_ns"] / 1e6),
-            }
-        )
-    if len(records) < policy.min_visible_cameras:
+        images[camera] = str(path.relative_to(policy.dataset_dir))
+    if len(images) < required_cameras:
         for path in written:
             path.unlink(missing_ok=True)
-        return False, f"camera 저장 부족: required={policy.min_visible_cameras}, details={failures}"
+        return False, f"camera 저장 부족: required={required_cameras}, details={failures}"
+    record = {
+        "id": capture_id,
+        "trial_id": trial_id,
+        "split": split,
+        "images": images,
+        "connector": _connector(task),
+        "collection_policy": policy.collection_policy,
+        "target_xyz_m": [float(value) for value in label_xyz],
+        "sampling_offset_xyz_m": sample["actual_xyz_m"],
+        "sampling_tier_mm": (
+            float(sample["tier_m"] * 1000.0)
+            if sample["tier_m"] is not None
+            else None
+        ),
+        "view_distance_m": sample["actual_view_distance_m"],
+        "capture_stamp_ns": capture_stamp,
+        "max_sync_skew_ns": _max_skew(timestamps),
+        "settle_position_error_mm": float(settle["position_error_m"] * 1000.0),
+        "settle_orientation_error_deg": float(
+            np.rad2deg(settle["orientation_error_rad"])
+        ),
+        "settle_wait_ms": float(settle["wait_ns"] / 1e6),
+    }
     try:
         with _dataset_write_lock(policy):
             with policy.samples_path.open("a", encoding="utf-8") as stream:
-                for record in records:
-                    stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError as exc:
         for path in written:
             path.unlink(missing_ok=True)
         return False, f"samples.jsonl 저장 실패: {exc}"
     policy.capture_count += 1
-    cameras = sorted(record["camera"] for record in records)
-    return True, f"capture_id={capture_id}, cameras={cameras}, saved_count={policy.capture_count}"
+    return True, (
+        f"capture_id={capture_id}, cameras={sorted(images)}, "
+        f"saved_count={policy.capture_count}"
+    )

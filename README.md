@@ -6,16 +6,18 @@ AI for Industry Challenge는 시뮬레이션 환경에서 UR5e 로봇 팔이 케
 포트에 삽입하는 산업 자동화 태스크입니다. 참가자는 카메라 관측, 로봇 상태,
 힘/토크 센서 정보를 이용해 포트 위치와 자세를 추정하고 삽입 정책을 구현합니다.
 
-현재 이 저장소에는 공식 AIC Toolkit 소스와, img2pos 학습 데이터를 자동 수집하는
-`PortOffsetCollect` 정책 및 runner가 포함되어 있습니다.
+현재 이 저장소에는 공식 AIC Toolkit 소스와, 거리 구간별 img2pos 학습 데이터를 자동
+수집하는 세 정책 및 공통 runner가 포함되어 있습니다.
 
 ## 주요 기능
 
-- 50/10/5/2mm tier별 XYZ/RPY offset을 집중 샘플링
+- 보드 전경, 포트 하강, 포트 근접의 세 수집 정책 선택
+- 거리·횡방향 위치·카메라 각도의 stratified random sampling
+- 근접 정책에서 50/10/5/2mm tier별 XYZ/RPY offset 집중 샘플링
 - plug와 port 사이에 기본 20mm 안전거리를 유지해 접촉 없이 촬영
 - controller reference와 실제 TCP 움직임 수렴 뒤 timestamp가 일치하는 카메라 frame 저장
 - 좌·중앙·우 카메라와 controller state의 ROS timestamp 동기화 검사
-- 캡처 시점의 TF를 조회해 영상과 ground-truth label의 시각 일치 보장
+- 동일 촬영시각의 카메라 image들을 한 capture로 묶고 해당 시점 TF로 단일 label 계산
 - 포트가 기본 2개 이상의 카메라에 보이는 sample만 저장
 - trial 단위 train/validation/test 분할과 compact JPEG·JSONL 생성
 - 독립 Zenoh/Gazebo partition을 사용한 headless 병렬 수집
@@ -85,13 +87,14 @@ GPU를 사용하지 않는 환경에서는 `--nvidia`를 제거합니다.
 ## 데이터 수집 실행
 
 runner가 randomized config/world를 만들고 `ground_truth:=true` simulator, 선택적
-rosbag, `PortOffsetCollect` policy를 순서대로 시작하고 종료합니다.
+rosbag, 선택한 collection policy를 순서대로 시작하고 종료합니다.
 
 ```bash
 cd aic-physic/ws_aic/src
 
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
+  --collection-policy near-port \
   --trials 100 \
   --workers 2 \
   --samples-per-trial 40 \
@@ -108,6 +111,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | 환경변수 | 기본값 | 설명 |
 | --- | --- | --- |
 | `AIC_COLLECT_STEPS` | runner에서 `40` | trial당 저장할 offset capture 수 |
+| `AIC_IMG2POS_COLLECTION_POLICY` | `near-port` | runner가 선택한 수집 정책 기록값 |
 | `AIC_IMG2POS_DATASET_VERSION` | 빈 문자열 | 데이터셋 하위 버전 디렉터리 |
 | `AIC_IMG2POS_DATASET_DIR` | `ws_aic/data/img2pos[/<version>]` | 데이터셋 출력 위치 |
 | `AIC_IMG2POS_MIN_VISIBLE_CAMERAS` | `2` | 저장에 필요한 최소 카메라 수 |
@@ -136,13 +140,13 @@ img2pos/<version>/
     └── test/<camera>/*.jpg
 ```
 
-`samples.jsonl`은 카메라 이미지 한 장당 한 행이며 이미지 경로, camera/connector,
-`target_xyz_m`, 안전거리 기준 실제 port-local sampling offset, sampling tier,
-촬영 시각·동기화 오차, pose 수렴 품질을 기록합니다.
+`samples.jsonl`은 동기화된 capture당 한 행이며 `images`에 camera별 JPEG 경로를 묶고,
+`collection_policy`, 단일 `target_xyz_m`, 실제 port-local sampling offset과 관측 거리,
+sampling tier, 촬영 시각·동기화 오차, pose 수렴 품질을 한 번만 기록합니다.
 같은 `trial_id`는 항상
 같은 split에 배정되어 train/validation/test 사이의 trial 누수를 막습니다. 수집 완료 후
-`collection_summary.json`으로 실제 capture 수와 tier·안전거리 기준
-±2/5/10/50mm sampling offset 분포를 검증합니다.
+`collection_summary.json`으로 실제 capture 수를 확인하고, `near-port` capture에 대해서만
+tier·안전거리 기준 ±2/5/10/50mm sampling offset 분포를 검증합니다.
 
 ## 협업 규칙
 

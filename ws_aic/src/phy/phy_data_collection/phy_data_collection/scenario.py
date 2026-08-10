@@ -120,6 +120,14 @@ def _nic_rails(active_rail: int, translation: float, yaw: float) -> dict:
     return rails
 
 
+def _nic_rail_for_trial(index: int, seed: int) -> int:
+    """매 5개 SFP trial에서 모든 rail을 한 번씩 무작위 순서로 선택한다."""
+    block, position = divmod(index, SFP_NIC_RAIL_COUNT)
+    rails = list(range(SFP_NIC_RAIL_COUNT))
+    random.Random(seed ^ (block * 0x9E3779B1)).shuffle(rails)
+    return rails[position]
+
+
 def _background_sc_rails(rng: random.Random) -> dict:
     """SFP trial 배경 SC mount 위치를 uniform 추출한다."""
     return {
@@ -277,7 +285,7 @@ def _make_sfp_trial(
     args: argparse.Namespace,
 ) -> tuple[str, dict, dict]:
     """하나의 SFP trial과 추적 metadata를 uniform randomization으로 만든다."""
-    nic_rail = rng.randrange(SFP_NIC_RAIL_COUNT)
+    nic_rail = _nic_rail_for_trial(index, args.seed)
     port_index = rng.randrange(SFP_PORT_COUNT)
     port_name = f"sfp_port_{port_index}"
     task_id = f"portoffset_sfp_{index:04d}_rail{nic_rail}_{port_name}"

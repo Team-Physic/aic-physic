@@ -336,6 +336,7 @@ def _policy_environment(
     if trial_split:
         env["AIC_IMG2POS_TRIAL_SPLIT"] = trial_split
     env["AIC_COLLECT_STEPS"] = str(args.samples_per_trial)
+    env["AIC_IMG2POS_COLLECTION_POLICY"] = args.collection_policy
     env["AIC_IMG2POS_DATASET_VERSION"] = args.dataset_version.strip()
     env["AIC_IMG2POS_DATASET_DIR"] = str(dataset_dir(args))
     env["AIC_IMG2POS_VAL_RATIO"] = str(args.val_ratio)
@@ -361,7 +362,20 @@ def _policy_environment(
     _set_optional_env(env, "AIC_PORT_COLLECT_RPY_NORM_MAX_RAD", args.rpy_norm_max_rad)
     env["AIC_IMG2POS_MIN_VISIBLE_CAMERAS"] = str(args.min_visible_cameras)
     env["AIC_IMG2POS_VISIBILITY_MARGIN_PX"] = str(args.visibility_margin_px)
+    env["AIC_IMG2POS_BOARD_MIN_VISIBLE_CAMERAS"] = str(
+        args.board_min_visible_cameras
+    )
+    env["AIC_IMG2POS_BOARD_VISIBILITY_MARGIN_PX"] = str(
+        args.board_visibility_margin_px
+    )
     env["AIC_PORT_COLLECT_BASE_Z_OFFSET_M"] = str(args.base_z_offset_mm / 1000.0)
+    env["AIC_BOARD_VIEW_DISTANCE_MIN_M"] = str(args.board_distance_min_mm / 1000.0)
+    env["AIC_BOARD_VIEW_DISTANCE_MAX_M"] = str(args.board_distance_max_mm / 1000.0)
+    env["AIC_BOARD_VIEW_LATERAL_LIMIT_M"] = str(args.board_lateral_limit_mm / 1000.0)
+    env["AIC_BOARD_VIEW_ANGLE_LIMIT_DEG"] = str(args.board_angle_limit_deg)
+    env["AIC_DESCENT_START_DISTANCE_M"] = str(args.descent_start_distance_mm / 1000.0)
+    env["AIC_DESCENT_LATERAL_LIMIT_M"] = str(args.descent_lateral_limit_mm / 1000.0)
+    env["AIC_DESCENT_ANGLE_LIMIT_DEG"] = str(args.descent_angle_limit_deg)
     env["AIC_COLLECT_SYNC_TOLERANCE_MS"] = str(args.sync_tolerance_ms)
     env["AIC_COLLECT_SYNC_WAIT_TIMEOUT_SEC"] = str(args.sync_wait_timeout_s)
     env["AIC_COLLECT_SETTLE_TIMEOUT_SEC"] = str(args.settle_timeout_s)

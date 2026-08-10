@@ -19,7 +19,13 @@ WORLD_TEMPLATE_PATH = (
 )
 EPISODE_TRACKING_DIR = Path("/tmp/aic_episodes")
 
-POLICY_MODULE = "phy_policy.ros.PortOffsetCollect"
+COLLECTION_POLICY_MODULES = {
+    "board-view": "phy_policy.ros.BoardViewCollect",
+    "descent": "phy_policy.ros.DescentCollect",
+    "near-port": "phy_policy.ros.NearPortCollect",
+}
+COLLECTION_POLICY_CHOICES = tuple(COLLECTION_POLICY_MODULES)
+POLICY_MODULE = COLLECTION_POLICY_MODULES["near-port"]
 ENGINE_SETUP = "/ws_aic/install/setup.bash"
 RUN_MARKER_ENV = "AIC_PORTOFFSET_RUN_ID"
 REGISTRY_FILENAME = "owned_process_groups.json"
@@ -61,6 +67,7 @@ CLI_DEFAULTS = {
     "policy_start_wait_s": 5.0,
     "robot_joint_noise_deg": 4.0,
     "cable_rpy_noise_deg": 20.0,
+    "collection_policy": "near-port",
     # Per-trial rosbag2 recording.
     "record_rosbag": False,
     "rosbag_output_dir": ROSBAG_ROOT,
@@ -96,8 +103,17 @@ CLI_DEFAULTS = {
     "yaw_max_deg": None,
     "rpy_norm_max_rad": None,
     "base_z_offset_mm": MIN_CLEARANCE_MM,
+    "board_distance_min_mm": 750.0,
+    "board_distance_max_mm": 850.0,
+    "board_lateral_limit_mm": 30.0,
+    "board_angle_limit_deg": 15.0,
+    "descent_start_distance_mm": 550.0,
+    "descent_lateral_limit_mm": 40.0,
+    "descent_angle_limit_deg": 20.0,
     "min_visible_cameras": 2,
     "visibility_margin_px": 64.0,
+    "board_min_visible_cameras": 1,
+    "board_visibility_margin_px": 32.0,
     # Capture timestamp synchronization.
     "sync_tolerance_ms": 30.0,
     "sync_wait_timeout_s": 1.0,

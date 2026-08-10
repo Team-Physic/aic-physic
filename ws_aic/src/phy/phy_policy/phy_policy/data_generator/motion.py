@@ -103,15 +103,16 @@ class Planner:
             ],
             dtype=float,
         )
-        port_axis = quaternion_matrix(*port_q) @ np.array([0.0, 0.0, -1.0])
+        port_rotation = quaternion_matrix(*port_q)
+        plug_rotation = quaternion_matrix(*plug_q)
+        port_axis = port_rotation @ np.array([0.0, 0.0, -1.0])
         norm = float(np.linalg.norm(port_axis))
         port_axis = port_axis / norm if norm > 1e-9 else np.array([0.0, 0.0, -1.0])
-        target_xyz = (
-            port_xyz
-            + port_axis * z_offset
-            + gripper_xyz
-            - plug_xyz
+        target_plug_xyz = port_xyz + port_axis * z_offset
+        target_tcp_from_plug = (
+            port_rotation @ plug_rotation.T @ (gripper_xyz - plug_xyz)
         )
+        target_xyz = target_plug_xyz + target_tcp_from_plug
         pose = Pose(
             position=Point(x=float(target_xyz[0]), y=float(target_xyz[1]), z=float(target_xyz[2])),
             orientation=Quaternion(
@@ -121,11 +122,67 @@ class Planner:
                 w=float(target_q[3]),
             ),
         )
-        return pose, {"target_xyz": target_xyz, "port_axis": port_axis}
+        return pose, {
+            "target_xyz": target_xyz,
+            "port_axis": port_axis,
+            "target_tcp_from_plug": target_tcp_from_plug,
+        }
 
 
-def build_samples(policy) -> list[dict[str, float]]:
-    """coarse/near tier별 quota를 지키는 stratified XYZ/RPY sample을 생성한다."""
+def _axis_samples(policy, low: float, high: float, count: int) -> np.ndarray:
+    """축 범위를 같은 구간으로 나눠 무작위 값을 하나씩 뽑는다."""
+    edges = np.linspace(low, high, count + 1)
+    values = policy.rng.uniform(edges[:-1], edges[1:])
+    policy.rng.shuffle(values)
+    return values
+
+
+def _build_view_samples(policy, *, descending: bool) -> list[dict[str, float]]:
+    """board-view 또는 descent 정책의 거리·횡방향·각도 sample을 만든다."""
+    count = policy.collect_steps
+    if descending:
+        distance_min, distance_max = policy.base_z_offset, policy.descent_start_distance
+        lateral_limit = policy.descent_lateral_limit
+        angle_limit = policy.descent_angle_limit
+    else:
+        distance_min, distance_max = policy.board_distance_range
+        lateral_limit = policy.board_lateral_limit
+        angle_limit = policy.board_angle_limit
+    distances = _axis_samples(policy, distance_min, distance_max, count)
+    if descending:
+        distances = np.sort(distances)[::-1]
+        distances[0] = distance_max
+        if count > 1:
+            distances[-1] = distance_min
+    values = {
+        "x": _axis_samples(policy, -lateral_limit, lateral_limit, count),
+        "y": _axis_samples(policy, -lateral_limit, lateral_limit, count),
+        "roll": _axis_samples(policy, -angle_limit, angle_limit, count),
+        "pitch": _axis_samples(policy, -angle_limit, angle_limit, count),
+        "yaw": _axis_samples(policy, -angle_limit, angle_limit, count),
+    }
+    return [
+        {
+            "x": float(values["x"][index]),
+            "y": float(values["y"][index]),
+            "z": 0.0,
+            "roll": float(values["roll"][index]),
+            "pitch": float(values["pitch"][index]),
+            "yaw": float(values["yaw"][index]),
+            "tier_m": None,
+            "distance_m": float(distances[index]),
+        }
+        for index in range(count)
+    ]
+
+
+def build_samples(policy) -> list[dict[str, float | None]]:
+    """선택된 수집 정책에 맞는 stratified 거리·XYZ·RPY sample을 생성한다."""
+    if policy.collection_policy == "board-view":
+        return _build_view_samples(policy, descending=False)
+    if policy.collection_policy == "descent":
+        return _build_view_samples(policy, descending=True)
+
     tiers = np.asarray(policy.sampling_tiers_m, dtype=float)
     weights = np.asarray(policy.sampling_tier_weights, dtype=float)
     raw_counts = weights / weights.sum() * policy.collect_steps
@@ -143,13 +200,6 @@ def build_samples(policy) -> list[dict[str, float]]:
     samples: list[dict[str, float]] = [zero]
     largest_tier = float(np.max(tiers))
 
-    def axis(low: float, high: float, count: int) -> np.ndarray:
-        """한 tier의 축 범위를 같은 구간으로 나눠 sample을 뽑는다."""
-        edges = np.linspace(low, high, count + 1)
-        values = policy.rng.uniform(edges[:-1], edges[1:])
-        policy.rng.shuffle(values)
-        return values
-
     for tier_index in np.argsort(-tiers):
         tier = tiers[tier_index]
         count = counts[tier_index]
@@ -157,7 +207,8 @@ def build_samples(policy) -> list[dict[str, float]]:
             continue
         scale = float(tier) / largest_tier
         values = {
-            name: axis(
+            name: _axis_samples(
+                policy,
                 policy.sample_ranges[name][0] * scale,
                 policy.sample_ranges[name][1] * scale,
                 int(count),
@@ -178,8 +229,10 @@ def build_samples(policy) -> list[dict[str, float]]:
                     "pitch": float(rpy[1]),
                     "yaw": float(rpy[2]),
                     "tier_m": float(tier),
+                    "distance_m": policy.base_z_offset,
                 }
             )
+    samples[0]["distance_m"] = policy.base_z_offset
     return samples
 
 
@@ -203,14 +256,12 @@ def _port_axes(port_tf: Transform, port_axis) -> tuple[np.ndarray, np.ndarray, n
     return x_axis, y_axis, z_axis
 
 
-def _apply_sample(policy, pose: Pose, port_tf: Transform, port_axis, index: int):
+def _apply_sample(policy, pose: Pose, port_tf: Transform, state: dict, index: int):
     """현재 stratified XYZ/RPY sample을 TCP 목표 pose에 적용한다."""
     sample = policy.samples[index % len(policy.samples)]
+    port_axis = state["port_axis"]
     x_axis, y_axis, z_axis = _port_axes(port_tf, port_axis)
-    offset = sample["x"] * x_axis + sample["y"] * y_axis + sample["z"] * z_axis
-    pose.position.x += float(offset[0])
-    pose.position.y += float(offset[1])
-    pose.position.z += float(offset[2])
+    sample_offset = sample["x"] * x_axis + sample["y"] * y_axis + sample["z"] * z_axis
     delta = multiply_quaternions(
         axis_angle_quaternion(z_axis, sample["yaw"]),
         multiply_quaternions(
@@ -224,6 +275,12 @@ def _apply_sample(policy, pose: Pose, port_tf: Transform, port_axis, index: int)
     if norm > 1e-9:
         quaternion /= norm
         pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w = map(float, quaternion)
+    tcp_from_plug = np.asarray(state["target_tcp_from_plug"], dtype=float)
+    position_correction = quaternion_matrix(*delta) @ tcp_from_plug - tcp_from_plug
+    position_offset = sample_offset + position_correction
+    pose.position.x += float(position_offset[0])
+    pose.position.y += float(position_offset[1])
+    pose.position.z += float(position_offset[2])
     detail = {
         "x_m": sample["x"],
         "y_m": sample["y"],
@@ -232,6 +289,7 @@ def _apply_sample(policy, pose: Pose, port_tf: Transform, port_axis, index: int)
         "pitch_deg": float(np.rad2deg(sample["pitch"])),
         "yaw_deg": float(np.rad2deg(sample["yaw"])),
         "tier_m": sample["tier_m"],
+        "distance_m": sample["distance_m"],
     }
     return pose, detail
 
@@ -252,6 +310,70 @@ def _actual_sampling_offset(
     ]
 
 
+def _board_view_pose(policy, context, index: int):
+    """보드 중심과 center camera extrinsic으로 무작위 관측 TCP pose를 역산한다."""
+    sample = policy.samples[index % len(policy.samples)]
+    pose = Pose(
+        position=Point(),
+        orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0),
+    )
+    x_axis = np.array([1.0, 0.0, 0.0])
+    y_axis = np.array([0.0, 1.0, 0.0])
+    z_axis = np.array([0.0, 0.0, 1.0])
+    delta = multiply_quaternions(
+        axis_angle_quaternion(z_axis, sample["yaw"]),
+        multiply_quaternions(
+            axis_angle_quaternion(y_axis, sample["pitch"]),
+            axis_angle_quaternion(x_axis, sample["roll"]),
+        ),
+    )
+    quaternion = np.asarray(
+        multiply_quaternions(delta, (1.0, 0.0, 0.0, 0.0)), dtype=float
+    )
+    quaternion /= max(float(np.linalg.norm(quaternion)), 1e-12)
+    (
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z,
+        pose.orientation.w,
+    ) = map(float, quaternion)
+    tcp_rotation = quaternion_matrix(*quaternion)
+    tcp_to_optical = np.linalg.inv(policy._tool0_tcp) @ policy._tool0_optical["center"]
+    camera_rotation = tcp_rotation @ tcp_to_optical[:3, :3]
+    camera_offset = tcp_rotation @ tcp_to_optical[:3, 3]
+    board_tf = context["board_snapshot"].transform
+    board_center = np.array(
+        [board_tf.translation.x, board_tf.translation.y, board_tf.translation.z],
+        dtype=float,
+    )
+    camera_origin = (
+        board_center
+        - camera_rotation[:, 2] * sample["distance_m"]
+        + camera_rotation[:, 0] * sample["x"]
+        + camera_rotation[:, 1] * sample["y"]
+    )
+    tcp_xyz = camera_origin - camera_offset
+    pose.position.x, pose.position.y, pose.position.z = map(float, tcp_xyz)
+    port_tf = context["port_snapshot"].transform
+    port_rotation = quaternion_matrix(
+        port_tf.rotation.x,
+        port_tf.rotation.y,
+        port_tf.rotation.z,
+        port_tf.rotation.w,
+    )
+    port_axis = port_rotation @ np.array([0.0, 0.0, -1.0])
+    return pose, {"port_axis": port_axis}, {
+        "x_m": sample["x"],
+        "y_m": sample["y"],
+        "z_m": 0.0,
+        "roll_deg": float(np.rad2deg(sample["roll"])),
+        "pitch_deg": float(np.rad2deg(sample["pitch"])),
+        "yaw_deg": float(np.rad2deg(sample["yaw"])),
+        "tier_m": None,
+        "distance_m": sample["distance_m"],
+    }
+
+
 def _copy_pose(pose: Pose) -> Pose:
     """ROS Pose를 값 복사한다."""
     return Pose(
@@ -262,6 +384,33 @@ def _copy_pose(pose: Pose) -> Pose:
             z=pose.orientation.z,
             w=pose.orientation.w,
         ),
+    )
+
+
+def _interpolate_quaternion(start: Pose, target: Pose, fraction: float) -> np.ndarray:
+    """두 pose의 quaternion을 최단 회전 경로로 보간한다."""
+    start_q = np.array(
+        [start.orientation.x, start.orientation.y, start.orientation.z, start.orientation.w],
+        dtype=float,
+    )
+    target_q = np.array(
+        [target.orientation.x, target.orientation.y, target.orientation.z, target.orientation.w],
+        dtype=float,
+    )
+    start_q /= max(float(np.linalg.norm(start_q)), 1e-12)
+    target_q /= max(float(np.linalg.norm(target_q)), 1e-12)
+    cosine = float(np.dot(start_q, target_q))
+    if cosine < 0.0:
+        target_q = -target_q
+        cosine = -cosine
+    if cosine > 0.9995:
+        quaternion = start_q + fraction * (target_q - start_q)
+        return quaternion / max(float(np.linalg.norm(quaternion)), 1e-12)
+    angle = float(np.arccos(np.clip(cosine, -1.0, 1.0)))
+    sine = float(np.sin(angle))
+    return (
+        np.sin((1.0 - fraction) * angle) / sine * start_q
+        + np.sin(fraction * angle) / sine * target_q
     )
 
 
@@ -365,15 +514,22 @@ def wait_for_pose_convergence(policy, get_observation, target: Pose, command_sta
 
 
 def _follow(policy, move_robot, start: Pose, target: Pose, steps: int, dt: float, label: str, stiffness, damping):
-    """현재 TCP에서 목표 pose까지 S-curve 위치 명령을 보낸다."""
+    """현재 TCP에서 목표 pose까지 S-curve 위치·자세 명령을 보낸다."""
     start_xyz = np.array([start.position.x, start.position.y, start.position.z])
     target_xyz = np.array([target.position.x, target.position.y, target.position.z])
     for index in range(max(1, steps)):
         t = (index + 1) / max(1, steps)
         fraction = 10.0 * t**3 - 15.0 * t**4 + 6.0 * t**5
         xyz = start_xyz * (1.0 - fraction) + target_xyz * fraction
+        quaternion = _interpolate_quaternion(start, target, fraction)
         pose = _copy_pose(target)
         pose.position.x, pose.position.y, pose.position.z = map(float, xyz)
+        (
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        ) = map(float, quaternion)
         policy.set_pose_target(move_robot, pose, stiffness, damping)
         if index in {0, max(1, steps) - 1}:
             policy.get_logger().info(
@@ -467,17 +623,17 @@ def failure_reason(reason: str) -> str:
     descriptions = {
         "missing_observation": "camera/controller Observation을 받지 못함",
         "missing_or_zero_timestamp": "camera 또는 controller source 시각이 없거나 0임",
-        "camera_time_difference_exceeded": "세 camera 촬영 시각 차이가 허용 범위를 초과함",
+        "camera_timestamp_mismatch": "세 camera의 촬영 시각이 서로 다름",
         "controller_time_difference_exceeded": "controller와 center camera 시각 차이가 허용 범위를 초과함",
         "capture_not_after_command": "center camera frame이 현재 명령보다 새롭지 않음",
-        "tf_time_difference_exceeded": "plug TF와 center camera 시각 차이가 허용 범위를 초과함",
+        "tf_time_difference_exceeded": "plug TF와 해당 camera 촬영 시각 차이가 허용 범위를 초과함",
     }
     detail = descriptions.get(key, key.replace("_", " "))
     return f"대기시간 내 일치하는 Observation을 찾지 못함: {detail}" if timed_out else detail
 
 
 def collect(policy, context, get_observation, move_robot) -> bool:
-    """목표 pose 수렴 후 tier별 image와 촬영 시점 XYZ label을 저장한다."""
+    """선택 정책의 목표 pose 수렴 후 촬영 시점 XYZ label과 image를 저장한다."""
     max_attempts_per_sample = int(np.ceil(policy.capture_attempt_multiplier))
     sample_attempts = 0
     while context["counts"]["collect"] < policy.collect_steps:
@@ -493,24 +649,63 @@ def collect(policy, context, get_observation, move_robot) -> bool:
         context["counts"]["attempts"] += 1
         try:
             port_tf = context["port_snapshot"].transform
+            planned_sample = policy.samples[index % len(policy.samples)]
             plug_tf = dataset.shift_origin(
                 policy.lookup_transform("base_link", context["cable_tip_frame"]),
                 context["plug_offset"],
             )
-            pose, state = policy.planner.build_pose(
-                port_tf,
-                plug_tf,
-                policy.lookup_transform("base_link", "gripper/tcp"),
-                z_offset=policy.base_z_offset,
+            if policy.collection_policy == "board-view":
+                pose, state, sample = _board_view_pose(policy, context, index)
+            else:
+                pose, state = policy.planner.build_pose(
+                    port_tf,
+                    plug_tf,
+                    policy.lookup_transform("base_link", "gripper/tcp"),
+                    z_offset=planned_sample["distance_m"],
+                )
+                pose, sample = _apply_sample(policy, pose, port_tf, state, index)
+            tier_text = (
+                f"tier={sample['tier_m']*1e3:g}mm"
+                if sample["tier_m"] is not None
+                else f"distance={sample['distance_m']*1e3:.1f}mm"
             )
-            pose, sample = _apply_sample(policy, pose, port_tf, state["port_axis"], index)
             policy.get_logger().info(
                 f"COLLECT {index + 1}/{policy.collect_steps} "
                 f"attempt={sample_attempts}/{max_attempts_per_sample} "
-                f"tier={sample['tier_m']*1e3:g}mm: "
+                f"policy={policy.collection_policy} {tier_text}: "
                 f"xyz=({sample['x_m']*1e3:+.1f}, {sample['y_m']*1e3:+.1f}, {sample['z_m']*1e3:+.1f})mm "
                 f"rpy=({sample['roll_deg']:+.1f}, {sample['pitch_deg']:+.1f}, {sample['yaw_deg']:+.1f})deg"
             )
+            if policy.collection_policy != "near-port":
+                start = _tcp_pose(get_observation())
+                if start is None:
+                    policy.get_logger().error(
+                        "[PortOffsetCollect] view move failed: missing TCP pose"
+                    )
+                    continue
+                distance = float(
+                    np.linalg.norm(
+                        np.array(
+                            [
+                                pose.position.x - start.position.x,
+                                pose.position.y - start.position.y,
+                                pose.position.z - start.position.z,
+                            ]
+                        )
+                    )
+                )
+                steps = min(120, max(10, int(np.ceil(distance / 0.003))))
+                _follow(
+                    policy,
+                    move_robot,
+                    start,
+                    pose,
+                    steps,
+                    0.03,
+                    policy.collection_policy,
+                    context["collect_stiffness"],
+                    context["collect_damping"],
+                )
             command_stamp = policy.set_pose_target(
                 move_robot, pose, context["collect_stiffness"], context["collect_damping"]
             )
@@ -551,16 +746,22 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 )
                 policy.sleep_for(policy.step_sleep_s)
                 continue
-            capture_stamp = observation.center_image.header.stamp
             wait_start = time.monotonic_ns()
             plug_stamped = policy.lookup_transform_at(
-                "base_link", context["cable_tip_frame"], capture_stamp
+                "base_link",
+                context["cable_tip_frame"],
+                dataset.image_for_camera(observation, "center").header.stamp,
             )
-            timestamps.setdefault("wait_ns", {})["tf"] = time.monotonic_ns() - wait_start
+            timestamps.setdefault("wait_ns", {})["tf"] = (
+                time.monotonic_ns() - wait_start
+            )
             valid, timestamps = dataset.tf_sync(
                 policy,
                 timestamps,
-                {"port": context["port_snapshot"], "plug": plug_stamped},
+                {
+                    "port": context["port_snapshot"],
+                    "plug": plug_stamped,
+                },
                 static_sources={"port"},
             )
             if not valid:
@@ -573,15 +774,19 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 )
                 policy.sleep_for(policy.step_sleep_s)
                 continue
-            plug_at_capture = dataset.shift_origin(plug_stamped.transform, context["plug_offset"])
-            label_xyz = dataset.target_xyz(port_tf, plug_at_capture)
+            label_xyz = dataset.target_xyz(
+                port_tf,
+                dataset.shift_origin(plug_stamped.transform, context["plug_offset"]),
+            )
             sampling_offset_xyz = _actual_sampling_offset(
                 label_xyz,
                 port_tf,
                 state["port_axis"],
-                policy.base_z_offset,
+                0.0 if policy.collection_policy == "board-view" else sample["distance_m"],
             )
-            if max(abs(value) for value in sampling_offset_xyz) > sample["tier_m"]:
+            if sample["tier_m"] is not None and max(
+                abs(value) for value in sampling_offset_xyz
+            ) > sample["tier_m"]:
                 policy.get_logger().error(
                     policy.log_text(
                         "[PortOffsetCollect] CAPTURE FAILED: actual TF sampling offset is outside "
@@ -593,7 +798,24 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                     )
                 )
                 continue
+            actual_view_distance_m = -float(
+                np.dot(np.asarray(label_xyz, dtype=float), state["port_axis"])
+            )
+            if (
+                policy.collection_policy != "board-view"
+                and actual_view_distance_m < policy.base_z_offset
+            ):
+                policy.get_logger().error(
+                    policy.log_text(
+                        "[PortOffsetCollect] CAPTURE FAILED: actual TF clearance is below "
+                        f"{policy.base_z_offset * 1e3:g}mm; "
+                        f"actual={actual_view_distance_m * 1e3:.3f}mm",
+                        "red",
+                    )
+                )
+                continue
             sample["actual_xyz_m"] = sampling_offset_xyz
+            sample["actual_view_distance_m"] = actual_view_distance_m
             saved, detail = dataset.save_sample(
                 policy,
                 episode_name=context["episode_name"],
@@ -605,6 +827,11 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 label_xyz=label_xyz,
                 sample=sample,
                 settle=settle,
+                board_tf=(
+                    context["board_snapshot"].transform
+                    if context.get("board_snapshot") is not None
+                    else None
+                ),
             )
             if saved:
                 context["counts"]["collect"] += 1
