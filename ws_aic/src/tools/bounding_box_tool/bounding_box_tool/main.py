@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import QApplication
 def _parser() -> argparse.ArgumentParser:
     """viewer 시작 경로만 받는 최소 CLI parser를 생성한다."""
     parser = argparse.ArgumentParser(
-        description="View AIC images and YOLO-pose annotations without editing them."
+        description="Edit AIC YOLO-pose boxes, keypoints, and occlusion visibility."
     )
     parser.add_argument(
         "path",
@@ -24,7 +24,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """PyQt application과 read-only viewer를 실행한다."""
+    """PyQt YOLO-pose annotation editor를 실행한다."""
     arguments = sys.argv[1:] if argv is None else argv
     args, qt_arguments = _parser().parse_known_args(arguments)
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)

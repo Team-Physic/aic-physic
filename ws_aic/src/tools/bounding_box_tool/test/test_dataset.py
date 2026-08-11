@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from bounding_box_tool.dataset import ImageDataset, load_annotations
+from bounding_box_tool.dataset import (
+    ImageDataset,
+    PoseAnnotation,
+    load_annotations,
+    save_annotations,
+)
 
 
 def _dataset(tmp_path: Path) -> Path:
@@ -88,3 +93,28 @@ def test_empty_annotation_is_valid_negative_sample(tmp_path):
     annotation_path.touch()
 
     assert load_annotations(annotation_path, {}) == ((), ())
+
+
+def test_save_annotations_round_trips_and_supports_empty_file(tmp_path):
+    annotation_path = tmp_path / "nested/sample.txt"
+    annotation = PoseAnnotation(
+        class_id=9,
+        label="SFP_41",
+        bbox=(0.5, 0.6, 0.2, 0.4),
+        keypoints=(
+            (0.4, 0.4, 2),
+            (0.6, 0.4, 1),
+            (0.6, 0.8, 2),
+            (0.4, 0.8, 0),
+        ),
+    )
+
+    save_annotations(annotation_path, (annotation,))
+    loaded, warnings = load_annotations(annotation_path, {9: "SFP_41"})
+
+    assert warnings == ()
+    assert loaded == (annotation,)
+
+    save_annotations(annotation_path, ())
+
+    assert annotation_path.read_text(encoding="utf-8") == ""

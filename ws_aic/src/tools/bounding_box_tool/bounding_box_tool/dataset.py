@@ -1,4 +1,4 @@
-"""YOLO-pose dataset discovery and read-only parsing."""
+"""YOLO-pose dataset discovery, parsing, and saving."""
 
 from __future__ import annotations
 
@@ -204,3 +204,21 @@ def load_annotations(
             )
         )
     return tuple(annotations), tuple(warnings)
+
+
+def annotation_row(annotation: PoseAnnotation) -> str:
+    """annotation을 17-field YOLO-pose 행으로 직렬화한다."""
+    values = [str(annotation.class_id)]
+    values.extend(f"{value:.9f}" for value in annotation.bbox)
+    for x, y, visibility in annotation.keypoints:
+        values.extend((f"{x:.9f}", f"{y:.9f}", str(int(visibility))))
+    return " ".join(values)
+
+
+def save_annotations(path: Path, annotations: tuple[PoseAnnotation, ...]) -> None:
+    """annotation을 대응 TXT에 원자적으로 저장한다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    contents = "\n".join(annotation_row(annotation) for annotation in annotations)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(contents + ("\n" if contents else ""), encoding="utf-8")
+    temporary.replace(path)

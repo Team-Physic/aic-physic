@@ -165,15 +165,15 @@ keypoint 순서와 치수는
 참고하십시오. SFP label은 0부터 세는 rail/port를 결합한 `SFP_<rail><port>`이며,
 예를 들어 rail 4의 port 1은 `SFP_41`입니다.
 
-저장 결과는 read-only PyQt viewer로 확인할 수 있습니다.
+저장 결과는 PyQt annotation editor로 확인하고 수정할 수 있습니다.
 
 ```bash
 cd ws_aic/src
 PIXI_FROZEN=true pixi run view_annotations ../data/img2pos/<version>
 ```
 
-폴더 탐색, bbox/keypoint overlay, 이전/다음 image와 확대·축소를 제공하며 현재 버전은
-annotation을 수정하거나 저장하지 않습니다. 자세한 사용법은
+폴더 탐색, 객체 추가·삭제, bbox/keypoint 수정, class 변경과 robot-arm occlusion 기반
+visibility 후처리를 제공합니다. 자세한 사용법은
 [`bounding_box_tool/README.md`](ws_aic/src/tools/bounding_box_tool/README.md)를
 참고하십시오.
 
