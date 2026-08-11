@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,12 @@ from pathlib import Path
 import yaml
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png"}
+SAMPLE_CAMERA_FIELDS = (
+    "images",
+    "annotations",
+    "annotation_object_counts",
+    "annotation_labels",
+)
 
 
 @dataclass(frozen=True)
@@ -221,4 +228,51 @@ def save_annotations(path: Path, annotations: tuple[PoseAnnotation, ...]) -> Non
     contents = "\n".join(annotation_row(annotation) for annotation in annotations)
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(contents + ("\n" if contents else ""), encoding="utf-8")
+    temporary.replace(path)
+
+
+def samples_without_image(
+    path: Path,
+    dataset_root: Path,
+    image_path: Path,
+) -> str:
+    """samples JSONL에서 현재 camera view를 제거한 전체 내용을 반환한다."""
+    relative_image = image_path.relative_to(dataset_root).as_posix()
+    updated_lines = []
+    matches = 0
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path.name} line {line_number}: {exc}") from exc
+        images = row.get("images")
+        cameras = (
+            [camera for camera, value in images.items() if value == relative_image]
+            if isinstance(images, dict)
+            else []
+        )
+        if not cameras:
+            updated_lines.append(line)
+            continue
+        matches += len(cameras)
+        for camera in cameras:
+            for field in SAMPLE_CAMERA_FIELDS:
+                values = row.get(field)
+                if isinstance(values, dict):
+                    values.pop(camera, None)
+        if row["images"]:
+            updated_lines.append(json.dumps(row, ensure_ascii=False))
+    if matches != 1:
+        raise ValueError(
+            f"expected one samples.jsonl entry for {relative_image}, found {matches}"
+        )
+    return "\n".join(updated_lines) + ("\n" if updated_lines else "")
+
+
+def save_samples(path: Path, contents: str) -> None:
+    """검증된 samples JSONL 전체를 원자적으로 교체한다."""
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(contents, encoding="utf-8")
     temporary.replace(path)

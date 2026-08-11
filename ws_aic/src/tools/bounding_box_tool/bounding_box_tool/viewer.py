@@ -12,6 +12,8 @@ from bounding_box_tool.dataset import (
     PoseAnnotation,
     load_annotations,
     save_annotations,
+    samples_without_image,
+    save_samples,
 )
 from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt5.QtGui import (
@@ -96,6 +98,46 @@ def _move_annotation(
     )
 
 
+def _move_annotation_selection(
+    annotations: tuple[PoseAnnotation, ...],
+    annotation_indices: set[int],
+    keypoint_indices: set[tuple[int, int]],
+    delta_x: float,
+    delta_y: float,
+) -> tuple[PoseAnnotation, ...]:
+    """선택된 bbox와 단독 keypoint를 같은 이동량으로 옮긴다."""
+    xs: list[float] = []
+    ys: list[float] = []
+    for annotation_index, annotation in enumerate(annotations):
+        if annotation_index in annotation_indices:
+            left, top, right, bottom = _bbox_edges(annotation)
+            xs.extend((left, right, *(point[0] for point in annotation.keypoints)))
+            ys.extend((top, bottom, *(point[1] for point in annotation.keypoints)))
+            continue
+        for keypoint_index, (x, y, _visibility) in enumerate(annotation.keypoints):
+            if (annotation_index, keypoint_index) in keypoint_indices:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        return annotations
+    delta_x = _clamp(delta_x, -min(xs), 1.0 - max(xs))
+    delta_y = _clamp(delta_y, -min(ys), 1.0 - max(ys))
+    moved = list(annotations)
+    for annotation_index, annotation in enumerate(annotations):
+        if annotation_index in annotation_indices:
+            moved[annotation_index] = _move_annotation(annotation, delta_x, delta_y)
+            continue
+        keypoints = list(annotation.keypoints)
+        changed = False
+        for keypoint_index, (x, y, visibility) in enumerate(keypoints):
+            if (annotation_index, keypoint_index) in keypoint_indices:
+                keypoints[keypoint_index] = (x + delta_x, y + delta_y, visibility)
+                changed = True
+        if changed:
+            moved[annotation_index] = replace(annotation, keypoints=tuple(keypoints))
+    return tuple(moved)
+
+
 def _resize_annotation(
     annotation: PoseAnnotation,
     corner: int,
@@ -169,6 +211,13 @@ class AnnotationCanvas(QGraphicsView):
         self._drag: tuple[str, int, int] | None = None
         self._drag_origin: QPointF | None = None
         self._drag_original: PoseAnnotation | None = None
+        self._drag_original_annotations: tuple[PoseAnnotation, ...] | None = None
+        self._drag_undo_state = None
+        self._selection_origin: QPointF | None = None
+        self._selection_preview: QGraphicsRectItem | None = None
+        self._selected_annotations: set[int] = set()
+        self._selected_keypoints: set[tuple[int, int]] = set()
+        self._undo_stack: list[tuple] = []
         self.setBackgroundBrush(QColor("#202124"))
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
@@ -195,6 +244,39 @@ class AnnotationCanvas(QGraphicsView):
     def selected_index(self) -> int:
         return self._selected_index
 
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo_stack)
+
+    @property
+    def has_deletable_selection(self) -> bool:
+        return self._selected_index >= 0 or bool(self._selected_annotations)
+
+    def _snapshot(self) -> tuple:
+        return (
+            tuple(self._annotations),
+            self._selected_index,
+            frozenset(self._selected_annotations),
+            frozenset(self._selected_keypoints),
+        )
+
+    def _push_undo(self) -> None:
+        self._undo_stack.append(self._snapshot())
+
+    def undo(self) -> None:
+        if not self._undo_stack:
+            return
+        annotations, selected_index, selected_annotations, selected_keypoints = (
+            self._undo_stack.pop()
+        )
+        self._annotations = list(annotations)
+        self._selected_index = selected_index
+        self._selected_annotations = set(selected_annotations)
+        self._selected_keypoints = set(selected_keypoints)
+        self._redraw_overlays()
+        self.selectionChanged.emit(self._selected_index)
+        self.annotationsChanged.emit()
+
     def set_image(
         self,
         image_path: Path,
@@ -207,16 +289,33 @@ class AnnotationCanvas(QGraphicsView):
         self._scene.clear()
         self._overlay_items.clear()
         self._preview_item = None
+        self._selection_preview = None
         self._pixmap_item = self._scene.addPixmap(pixmap)
         self._pixmap_item.setZValue(0)
         self._scene.setSceneRect(QRectF(pixmap.rect()))
         self._annotations = list(annotations)
         self._selected_index = -1
+        self._selected_annotations.clear()
+        self._selected_keypoints.clear()
+        self._undo_stack.clear()
         self._redraw_overlays()
         self.resetTransform()
         self.fit_to_view()
         self.selectionChanged.emit(-1)
         return True
+
+    def clear_image(self) -> None:
+        """마지막 image 삭제 후 canvas 상태를 비운다."""
+        self.set_add_mode(False)
+        self._scene.clear()
+        self._overlay_items.clear()
+        self._pixmap_item = None
+        self._annotations.clear()
+        self._selected_index = -1
+        self._selected_annotations.clear()
+        self._selected_keypoints.clear()
+        self._undo_stack.clear()
+        self.selectionChanged.emit(-1)
 
     def _annotation_rect(self, annotation: PoseAnnotation) -> QRectF:
         image_width, image_height = self.image_size
@@ -243,7 +342,15 @@ class AnnotationCanvas(QGraphicsView):
                 annotation,
                 image_width,
                 image_height,
-                selected=index == self._selected_index,
+                selected=(
+                    index == self._selected_index
+                    or index in self._selected_annotations
+                ),
+                selected_keypoints={
+                    keypoint_index
+                    for annotation_index, keypoint_index in self._selected_keypoints
+                    if annotation_index == index
+                },
             )
         for item in self._overlay_items:
             item.setVisible(self._annotations_visible)
@@ -259,6 +366,7 @@ class AnnotationCanvas(QGraphicsView):
         image_height: int,
         *,
         selected: bool,
+        selected_keypoints: set[int],
     ) -> None:
         """bbox, polygon, visibility별 keypoint와 선택 handle을 그린다."""
         color = QColor("#ffee58") if selected else class_color(annotation.class_id)
@@ -283,13 +391,20 @@ class AnnotationCanvas(QGraphicsView):
             if visibility <= 0:
                 continue
             point = QPointF(x * image_width, y * image_height)
-            marker_pen = QPen(KEYPOINT_COLORS[index - 1], 2.0)
+            keypoint_selected = index - 1 in selected_keypoints
+            marker_pen = QPen(
+                QColor("#ffee58") if keypoint_selected else KEYPOINT_COLORS[index - 1],
+                3.5 if keypoint_selected else 2.0,
+            )
             marker_pen.setCosmetic(True)
             brush = QBrush(KEYPOINT_COLORS[index - 1])
             if visibility == 1:
                 marker_pen.setStyle(Qt.DashLine)
                 brush = QBrush(Qt.NoBrush)
-            marker = self._scene.addEllipse(-5.0, -5.0, 10.0, 10.0, marker_pen, brush)
+            radius = 7.0 if keypoint_selected else 5.0
+            marker = self._scene.addEllipse(
+                -radius, -radius, radius * 2.0, radius * 2.0, marker_pen, brush
+            )
             marker.setPos(point)
             marker.setFlag(QGraphicsItem.ItemIgnoresTransformations)
             self._add_overlay(marker, 13)
@@ -332,13 +447,20 @@ class AnnotationCanvas(QGraphicsView):
     def set_selected_index(self, index: int) -> None:
         """객체 selection을 변경하고 handle을 다시 그린다."""
         normalized = index if 0 <= index < len(self._annotations) else -1
-        if normalized == self._selected_index:
+        if (
+            normalized == self._selected_index
+            and not self._selected_annotations
+            and not self._selected_keypoints
+        ):
             return
         self._selected_index = normalized
+        self._selected_annotations.clear()
+        self._selected_keypoints.clear()
         self._redraw_overlays()
         self.selectionChanged.emit(normalized)
 
     def add_annotation(self, annotation: PoseAnnotation) -> None:
+        self._push_undo()
         self._annotations.append(annotation)
         self._selected_index = len(self._annotations) - 1
         self._redraw_overlays()
@@ -348,22 +470,40 @@ class AnnotationCanvas(QGraphicsView):
     def replace_selected(self, annotation: PoseAnnotation) -> None:
         if not 0 <= self._selected_index < len(self._annotations):
             return
+        if self._annotations[self._selected_index] == annotation:
+            return
+        self._push_undo()
         self._annotations[self._selected_index] = annotation
         self._redraw_overlays()
         self.annotationsChanged.emit()
 
     def delete_selected(self) -> None:
-        if not 0 <= self._selected_index < len(self._annotations):
+        indices = (
+            self._selected_annotations
+            if self._selected_annotations
+            else {self._selected_index}
+        )
+        indices = {index for index in indices if 0 <= index < len(self._annotations)}
+        if not indices:
             return
-        del self._annotations[self._selected_index]
-        self._selected_index = min(self._selected_index, len(self._annotations) - 1)
+        self._push_undo()
+        for index in sorted(indices, reverse=True):
+            del self._annotations[index]
+        self._selected_index = -1
+        self._selected_annotations.clear()
+        self._selected_keypoints.clear()
         self._redraw_overlays()
-        self.selectionChanged.emit(self._selected_index)
+        self.selectionChanged.emit(-1)
         self.annotationsChanged.emit()
 
     def set_annotations(self, annotations: tuple[PoseAnnotation, ...]) -> None:
         """후처리된 annotation 전체를 현재 image에 적용한다."""
+        if annotations == tuple(self._annotations):
+            return
+        self._push_undo()
         self._annotations = list(annotations)
+        self._selected_annotations.clear()
+        self._selected_keypoints.clear()
         self._selected_index = min(self._selected_index, len(self._annotations) - 1)
         self._redraw_overlays()
         self.selectionChanged.emit(self._selected_index)
@@ -383,6 +523,10 @@ class AnnotationCanvas(QGraphicsView):
         if self._preview_item is not None:
             self._scene.removeItem(self._preview_item)
             self._preview_item = None
+        if self._selection_preview is not None:
+            self._scene.removeItem(self._selection_preview)
+            self._selection_preview = None
+        self._selection_origin = None
         self.setCursor(Qt.CrossCursor if enabled else Qt.ArrowCursor)
         self.addModeChanged.emit(enabled)
 
@@ -417,6 +561,31 @@ class AnnotationCanvas(QGraphicsView):
                 return "move", annotation_index, -1
         return None
 
+    def _hit_selected_range(self, hit: tuple[str, int, int]) -> bool:
+        kind, annotation_index, detail = hit
+        return annotation_index in self._selected_annotations or (
+            kind == "keypoint"
+            and (annotation_index, detail) in self._selected_keypoints
+        )
+
+    def _select_range(self, rectangle: QRectF) -> None:
+        width, height = self.image_size
+        self._selected_annotations = {
+            index
+            for index, annotation in enumerate(self._annotations)
+            if rectangle.contains(self._annotation_rect(annotation))
+        }
+        self._selected_keypoints = {
+            (annotation_index, keypoint_index)
+            for annotation_index, annotation in enumerate(self._annotations)
+            if annotation_index not in self._selected_annotations
+            for keypoint_index, (x, y, visibility) in enumerate(annotation.keypoints)
+            if visibility > 0 and rectangle.contains(QPointF(x * width, y * height))
+        }
+        self._selected_index = -1
+        self._redraw_overlays()
+        self.selectionChanged.emit(-1)
+
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.LeftButton or self._pixmap_item is None:
             super().mousePressEvent(event)
@@ -430,16 +599,32 @@ class AnnotationCanvas(QGraphicsView):
             self._preview_item.setZValue(20)
             event.accept()
             return
+        if event.modifiers() & Qt.ShiftModifier:
+            self._selection_origin = point
+            pen = QPen(QColor("#ffee58"), 2.0, Qt.DashLine)
+            pen.setCosmetic(True)
+            self._selection_preview = self._scene.addRect(QRectF(point, point), pen)
+            self._selection_preview.setZValue(20)
+            event.accept()
+            return
         hit = self._hit_test(point)
         if hit is None:
             self.set_selected_index(-1)
             super().mousePressEvent(event)
+            return
+        if self._hit_selected_range(hit):
+            self._drag = ("group", -1, -1)
+            self._drag_origin = point
+            self._drag_original_annotations = tuple(self._annotations)
+            self._drag_undo_state = self._snapshot()
+            event.accept()
             return
         _kind, annotation_index, _detail = hit
         self.set_selected_index(annotation_index)
         self._drag = hit
         self._drag_origin = point
         self._drag_original = self._annotations[annotation_index]
+        self._drag_undo_state = self._snapshot()
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
@@ -449,14 +634,36 @@ class AnnotationCanvas(QGraphicsView):
                 self._preview_item.setRect(QRectF(self._add_origin, point).normalized())
             event.accept()
             return
-        if self._drag is None or self._drag_origin is None or self._drag_original is None:
+        if self._selection_origin is not None:
+            if self._selection_preview is not None:
+                self._selection_preview.setRect(
+                    QRectF(self._selection_origin, point).normalized()
+                )
+            event.accept()
+            return
+        if self._drag is None or self._drag_origin is None:
             super().mouseMoveEvent(event)
             return
         kind, annotation_index, detail = self._drag
         width, height = self.image_size
         normalized_x = point.x() / width
         normalized_y = point.y() / height
-        if kind == "move":
+        if kind == "group" and self._drag_original_annotations is not None:
+            self._annotations = list(
+                _move_annotation_selection(
+                    self._drag_original_annotations,
+                    self._selected_annotations,
+                    self._selected_keypoints,
+                    (point.x() - self._drag_origin.x()) / width,
+                    (point.y() - self._drag_origin.y()) / height,
+                )
+            )
+            self._redraw_overlays()
+            event.accept()
+            return
+        elif self._drag_original is None:
+            return
+        elif kind == "move":
             annotation = _move_annotation(
                 self._drag_original,
                 (point.x() - self._drag_origin.x()) / width,
@@ -501,14 +708,28 @@ class AnnotationCanvas(QGraphicsView):
                 )
             event.accept()
             return
+        if event.button() == Qt.LeftButton and self._selection_origin is not None:
+            rectangle = QRectF(self._selection_origin, point).normalized()
+            self._selection_origin = None
+            if self._selection_preview is not None:
+                self._scene.removeItem(self._selection_preview)
+                self._selection_preview = None
+            self._select_range(rectangle)
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._drag is not None:
-            _kind, annotation_index, _detail = self._drag
-            changed = self._annotations[annotation_index] != self._drag_original
+            changed = (
+                self._drag_undo_state is not None
+                and tuple(self._annotations) != self._drag_undo_state[0]
+            )
             self._drag = None
             self._drag_origin = None
             self._drag_original = None
+            self._drag_original_annotations = None
             if changed:
+                self._undo_stack.append(self._drag_undo_state)
                 self.annotationsChanged.emit()
+            self._drag_undo_state = None
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -545,6 +766,7 @@ class BoundingBoxViewer(QMainWindow):
         self.dataset: ImageDataset | None = None
         self.current_index = -1
         self.dirty = False
+        self._saved_annotations: tuple[PoseAnnotation, ...] = ()
         self._changing_image_row = False
         self.setWindowTitle("Bounding Box Tool")
         self.resize(1500, 900)
@@ -627,7 +849,13 @@ class BoundingBoxViewer(QMainWindow):
         self.add_action.toggled.connect(self.canvas.set_add_mode)
         self.delete_action = QAction("Delete Object", self)
         self.delete_action.setShortcut(QKeySequence.Delete)
-        self.delete_action.triggered.connect(self.canvas.delete_selected)
+        self.delete_action.triggered.connect(self._delete_selected)
+        self.delete_sample_action = QAction("Delete Image + Label", self)
+        self.delete_sample_action.setShortcut(QKeySequence("Ctrl+D"))
+        self.delete_sample_action.triggered.connect(self._delete_current_sample)
+        self.undo_action = QAction("Undo", self)
+        self.undo_action.setShortcut(QKeySequence.Undo)
+        self.undo_action.triggered.connect(self.canvas.undo)
         self.edit_class_action = QAction("Edit Class…", self)
         self.edit_class_action.setShortcut(QKeySequence("E"))
         self.edit_class_action.triggered.connect(self._edit_class)
@@ -665,6 +893,7 @@ class BoundingBoxViewer(QMainWindow):
         for action in (
             self.add_action,
             self.delete_action,
+            self.delete_sample_action,
             self.edit_class_action,
             self.auto_visibility_action,
         ):
@@ -688,8 +917,11 @@ class BoundingBoxViewer(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close, QKeySequence.Quit)
         edit_menu = self.menuBar().addMenu("Edit")
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addSeparator()
         edit_menu.addAction(self.add_action)
         edit_menu.addAction(self.delete_action)
+        edit_menu.addAction(self.delete_sample_action)
         edit_menu.addAction(self.edit_class_action)
         edit_menu.addSeparator()
         edit_menu.addAction(self.auto_visibility_action)
@@ -715,7 +947,11 @@ class BoundingBoxViewer(QMainWindow):
         selected = self.canvas.selected_index >= 0
         self.save_action.setEnabled(editable and self.dirty)
         self.add_action.setEnabled(editable)
-        self.delete_action.setEnabled(editable and selected)
+        self.delete_action.setEnabled(
+            editable and self.canvas.has_deletable_selection
+        )
+        self.delete_sample_action.setEnabled(entry is not None)
+        self.undo_action.setEnabled(editable and self.canvas.can_undo)
         self.edit_class_action.setEnabled(editable and selected)
         self.auto_visibility_action.setEnabled(editable and bool(self.canvas.annotations))
 
@@ -778,6 +1014,7 @@ class BoundingBoxViewer(QMainWindow):
             self._restore_image_row()
             return
         self.current_index = index
+        self._saved_annotations = annotations
         self.canvas.set_annotations_visible(self.overlay_action.isChecked())
         self._refresh_object_list()
         self.annotation_path.setText(
@@ -830,9 +1067,9 @@ class BoundingBoxViewer(QMainWindow):
         self.canvas.set_selected_index(index)
 
     def _annotations_changed(self) -> None:
-        self._set_dirty(True)
+        self._set_dirty(self.canvas.annotations != self._saved_annotations)
         self._refresh_object_list()
-        self._show_status("Unsaved changes")
+        self._show_status("Unsaved changes" if self.dirty else "Restored")
 
     def save_current(self) -> bool:
         entry = self._current_entry()
@@ -843,6 +1080,7 @@ class BoundingBoxViewer(QMainWindow):
         except OSError as exc:
             QMessageBox.critical(self, "Cannot save annotation", str(exc))
             return False
+        self._saved_annotations = self.canvas.annotations
         self._set_dirty(False)
         self._show_status("Saved")
         return True
@@ -936,6 +1174,105 @@ class BoundingBoxViewer(QMainWindow):
         self.canvas.replace_selected(
             replace(annotation, class_id=class_id, label=label)
         )
+
+    def _delete_selected(self) -> None:
+        if not self.canvas.has_deletable_selection:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete annotation",
+            "선택한 bbox를 삭제하시겠습니까?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.canvas.delete_selected()
+
+    def _delete_current_sample(self) -> None:
+        entry = self._current_entry()
+        if entry is None or self.dataset is None or self.dataset.dataset_root is None:
+            return
+        root = self.dataset.dataset_root
+        samples_path = root / "samples.jsonl"
+        answer = QMessageBox.question(
+            self,
+            "Delete image and label",
+            "해당 데이터를 삭제하시겠습니까?\n\n"
+            f"이미지: {entry.image_path}\n"
+            f"라벨: {entry.annotation_path or '없음'}\n\n"
+            "samples.jsonl을 갱신하고 다음 이미지로 이동합니다.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            updated_samples = samples_without_image(
+                samples_path, root, entry.image_path
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "Cannot update samples.jsonl", str(exc))
+            return
+
+        staged = []
+        try:
+            for path in (entry.image_path, entry.annotation_path):
+                if path is None or not path.exists():
+                    continue
+                temporary = path.with_name(f".{path.name}.deleting")
+                if temporary.exists():
+                    raise FileExistsError(f"temporary file already exists: {temporary}")
+                path.replace(temporary)
+                staged.append((path, temporary))
+        except OSError as exc:
+            for original, temporary in reversed(staged):
+                temporary.replace(original)
+            QMessageBox.critical(self, "Cannot delete data", str(exc))
+            return
+        try:
+            save_samples(samples_path, updated_samples)
+        except OSError as exc:
+            for original, temporary in reversed(staged):
+                temporary.replace(original)
+            QMessageBox.critical(self, "Cannot update samples.jsonl", str(exc))
+            return
+
+        cleanup_errors = []
+        for _original, temporary in staged:
+            try:
+                temporary.unlink()
+            except OSError as exc:
+                cleanup_errors.append(str(exc))
+
+        deleted_index = self.current_index
+        entries = self.dataset.entries
+        self.dataset = replace(
+            self.dataset,
+            entries=entries[:deleted_index] + entries[deleted_index + 1 :],
+        )
+        self.image_list.blockSignals(True)
+        self.image_list.takeItem(deleted_index)
+        self.image_list.setCurrentRow(-1)
+        self.image_list.blockSignals(False)
+        self.current_index = -1
+        self._saved_annotations = ()
+        self._set_dirty(False)
+        if cleanup_errors:
+            QMessageBox.warning(
+                self,
+                "Cleanup incomplete",
+                "\n".join(cleanup_errors),
+            )
+        if self.dataset.entries:
+            self.image_list.setCurrentRow(
+                min(deleted_index, len(self.dataset.entries) - 1)
+            )
+            return
+        self.canvas.clear_image()
+        self.object_list.clear()
+        self.annotation_path.setText("No annotation")
+        self.warning_label.clear()
+        self.statusBar().showMessage("No images remain")
 
     def _auto_visibility(self) -> None:
         # QApplication이 platform plugin을 초기화하기 전에 cv2를 import하면

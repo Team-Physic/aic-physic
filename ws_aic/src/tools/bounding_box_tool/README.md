@@ -35,10 +35,13 @@ directory 또는 단일 image를 선택할 수 있습니다. dataset을 찾으�
 | `W` / `Add Box` | canvas에서 새 bbox를 drag하고 class 선택 |
 | 객체 또는 우측 목록 click | 편집할 객체 선택 |
 | bbox 내부 drag | bbox와 4개 keypoint 함께 이동 |
+| `Shift` + canvas drag 후 선택 항목 drag | 범위 안 bbox와 keypoint 함께 이동 |
 | bbox corner drag | bbox 크기와 keypoint 상대 위치 조절 |
 | keypoint drag | 해당 keypoint 위치 수정 |
 | `E` / 객체 double click | class 변경 |
-| `Delete` | 선택 객체 삭제 |
+| `Delete` | 확인 후 단일 또는 범위 선택 bbox 삭제 |
+| `Ctrl+D` | 현재 image·annotation 삭제, samples.jsonl 갱신 후 다음 image |
+| `Ctrl+Z` | 바로 이전 annotation 상태로 복원 |
 | `V` / `Auto Visibility` | 현재 image의 robot-arm occlusion 자동 반영 |
 | `←` / `A`, `→` / `D` | 이전/다음 image |
 | mouse wheel / `Ctrl++`, `Ctrl+-` | 확대·축소 |
@@ -49,6 +52,12 @@ directory 또는 단일 image를 선택할 수 있습니다. dataset을 찾으�
 수정 후 title에 `*`가 표시됩니다. 저장하지 않고 다른 image를 열거나 종료하면
 Save/Discard/Cancel을 묻습니다. 저장은 기존 17-field YOLO-pose TXT를 원자적으로
 교체하며 모든 객체를 삭제하면 빈 annotation 파일을 남깁니다.
+
+`Ctrl+D`는 확인 후 현재 camera view의 image와 annotation을 영구 삭제하고,
+`samples.jsonl`의 `images`, `annotations`, `annotation_object_counts`,
+`annotation_labels`에서 해당 camera 항목을 제거합니다. 남은 camera가 없으면 해당
+JSONL 행도 제거합니다. 이 파일 삭제는 `Ctrl+Z`로 복원되지 않습니다.
+`yolo_pose.yaml`에는 image별 항목이 없으므로 변경하지 않습니다.
 
 ## Auto Visibility
 
