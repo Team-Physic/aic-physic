@@ -230,9 +230,28 @@ def test_cli_exposes_haptic_guard_defaults() -> None:
     assert args.haptic_contact_duration_s == 0.2
 
 
-def test_collect_saves_sample_below_command_base_distance(monkeypatch) -> None:
+def test_sfp_collection_uses_increased_translational_impedance() -> None:
+    control = motion.control_for(SimpleNamespace(port_type="sfp"))
+
+    assert control["collect_stiffness"][:3] == [250.0, 250.0, 250.0]
+    assert control["collect_damping"][:3] == [80.0, 80.0, 80.0]
+
+
+def test_actual_sampling_tier_uses_smallest_containing_box() -> None:
+    policy = SimpleNamespace(
+        collection_policy="near-port",
+        sampling_tiers_m=[0.050, 0.010, 0.005, 0.002],
+    )
+
+    assert motion._actual_sampling_tier(policy, [0.004, -0.001, 0.003]) == 0.005
+    assert motion._actual_sampling_tier(policy, [0.005077, 0.002, 0.0002]) == 0.010
+    assert motion._actual_sampling_tier(policy, [0.051, 0.0, 0.0]) is None
+
+
+def test_collect_saves_and_reclassifies_sample_outside_planned_tier(monkeypatch) -> None:
     policy = _Policy()
     policy.collection_policy = "near-port"
+    policy.sampling_tiers_m = [0.050, 0.010, 0.005, 0.002]
     policy.collect_steps = 1
     policy.max_attempts = 1
     policy.step_sleep_s = 0.0
@@ -246,7 +265,7 @@ def test_collect_saves_sample_below_command_base_distance(monkeypatch) -> None:
             "roll": 0.0,
             "pitch": 0.0,
             "yaw": 0.0,
-            "tier_m": 0.050,
+            "tier_m": 0.005,
             "distance_m": 0.020,
         }
     ]
@@ -288,7 +307,7 @@ def test_collect_saves_sample_below_command_base_distance(monkeypatch) -> None:
                 "roll_rad": 0.0,
                 "pitch_rad": 0.0,
                 "yaw_rad": 0.0,
-                "tier_m": 0.050,
+                "tier_m": 0.005,
                 "distance_m": 0.020,
             },
         ),
@@ -316,7 +335,7 @@ def test_collect_saves_sample_below_command_base_distance(monkeypatch) -> None:
     monkeypatch.setattr(
         motion.dataset,
         "target_xyz",
-        lambda *_args: [0.0, 0.0, 0.015],
+        lambda *_args: [-0.006, 0.0, 0.015],
     )
 
     def save_sample(_policy, **kwargs):
@@ -342,3 +361,5 @@ def test_collect_saves_sample_below_command_base_distance(monkeypatch) -> None:
     assert collected
     assert context["counts"]["collect"] == 1
     assert saved_sample["actual_view_distance_m"] == 0.015
+    assert saved_sample["tier_m"] == 0.005
+    assert saved_sample["actual_tier_m"] == 0.010

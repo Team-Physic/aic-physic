@@ -230,29 +230,33 @@ capture를 승인합니다. 이미지 한 장이라도 저장하지 못하면 pa
 capture를 삭제하고 재시도합니다. port 가시성 조건을 통과하지 못하면 같은 waypoint를
 반복하지 않고 다음 waypoint로 이동합니다. 준비된 waypoint를 모두 사용해도 저장된
 capture 수가 목표보다 적으면 새 waypoint 묶음을 생성해 계속 수집합니다. `near-port`는
-실제 TF에서 20mm 기준 거리를 제외한 port-local offset이 배정된 sampling tier 안에
-있는지 검사합니다. 실제 접근축 거리는 metadata로 기록하지만 capture 승인 조건으로
-사용하지 않습니다. 명령 직후 frame은
+계획한 sampling tier와 촬영 시점 실제 TF에서 20mm 기준 거리를 제외한 port-local
+offset을 함께 저장합니다. 실제 offset이 계획 tier를 벗어나도 capture를 버리지 않고,
+실제 offset을 포함하는 가장 작은 tier로 재분류합니다. 실제 접근축 거리도 metadata로
+기록하지만 capture 승인 조건으로 사용하지 않습니다. 명령 직후 frame은
 사용하지 않고 controller reference와 실제 TCP 움직임이 수렴한 이후의 다음 camera
-frame을 선택합니다. 조건을 통과하지 못한 tier는 재시도하며 목표 capture 수를 채우지
-못한 trial은 실패 처리합니다.
+frame을 선택합니다. 목표 capture 수를 채우지 못한 trial은 실패 처리합니다.
 
 near-port와 descent는 이동 직전 10개 F/T frame의 중앙값을 정지 baseline으로
 사용합니다. raw force에서 controller tare를 뺀 뒤 `base_link`로 회전하고, 이 값에서
 baseline 벡터를 빼므로 cable 등의 정적 하중은 접촉 force에 포함하지 않습니다. 보정
 force가 임계치를 지정 시간 이상 넘으면 현재 자세에서 정지하고 출발 자세로 후퇴한 뒤
-해당 waypoint를 건너뜁니다.
+해당 waypoint를 건너뜁니다. SFP 수집 구간의 기본 translational stiffness/damping은
+각각 `250N/m`, `80N·s/m`입니다.
 
 임피던스 제어에서는 외력과 유한 stiffness 때문에 reference와 실제 TCP 사이에
 정상상태 tracking error가 남을 수 있습니다. 이 값은 log 진단용으로만 기록하고 동작
 완료 조건으로 사용하지 않습니다. 실제 TF label과 접근축 거리를 저장하고,
-`near-port`의 tier 검사로 sample 정확도를 확인합니다. 이동 중 접촉 안전은 haptic
-guard가 담당하며, 접촉을 감지하면 정지·후퇴하고 해당 waypoint를 건너뜁니다.
+계획 tier와 실제 TF로 재분류한 tier를 비교해 tracking 영향을 확인합니다. 이동 중 접촉
+안전은 haptic guard가 담당하며, 접촉을 감지하면 정지·후퇴하고 해당 waypoint를
+건너뜁니다.
 
 `collection_summary.json`의 `near_port_sampling_offset_box_coverage_mm`은 `near-port`
 capture만 대상으로, 촬영 시점 TF에서 기준 거리를 제외한 실제 port-local offset이 각
 ±2/5/10/50mm box 안에 들어온 수와 비율입니다. `target_xyz_m`에는 추론과 제어에 필요한
 안전거리까지 포함된 `base_link` correction을 그대로 저장합니다.
+`captures_by_planned_sampling_tier_mm`와 `captures_by_actual_sampling_tier_mm`은 계획 분포와
+실제 도달 분포를 각각 보여줍니다.
 
 port는 trial 동안 고정되므로 시작 시 한 번 snapshot하고, 움직이는 plug는 공통 capture
 시각으로 조회합니다. 학습 row에는 하나의 `capture_stamp_ns`와 승인 source 중 가장 큰
@@ -401,7 +405,9 @@ keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(
 | `collection_policy` | `board-view`, `descent`, `near-port` 수집 구간 |
 | `target_xyz_m` | 공통 촬영 시점 `base_link`의 `port_entrance - plug_reference` correction |
 | `sampling_offset_xyz_m` | 명령 기준 거리를 제외한 실제 port-local XYZ; tier 분포 감사용 |
-| `sampling_tier_mm` | near-port capture의 coarse/near tier; 다른 정책은 `null` |
+| `sampling_tier_mm` | 호환성을 위해 유지하는 계획 sampling tier; 다른 정책은 `null` |
+| `planned_sampling_tier_mm` | waypoint 생성 시 배정한 near-port sampling tier |
+| `actual_sampling_tier_mm` | 촬영 시점 실제 offset을 포함하는 가장 작은 tier; 최대 tier 밖이거나 다른 정책이면 `null` |
 | `view_distance_m` | 촬영 시점 plug와 port 사이 접근축 거리 |
 | `capture_stamp_ns` | 묶인 camera images의 공통 촬영 ROS 시각 |
 | `max_sync_skew_ns` | 승인 source들의 최대 시각 차이 |

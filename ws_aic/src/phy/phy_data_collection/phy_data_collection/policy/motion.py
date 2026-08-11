@@ -18,8 +18,8 @@ from .geometry import (
 )
 
 
-STIFFNESS = [100.0, 100.0, 100.0, 50.0, 50.0, 50.0]
-DAMPING = [40.0, 40.0, 40.0, 20.0, 20.0, 20.0]
+STIFFNESS = [250.0, 250.0, 250.0, 50.0, 50.0, 50.0]
+DAMPING = [80.0, 80.0, 80.0, 20.0, 20.0, 20.0]
 LIFT_STIFFNESS = [140.0, 140.0, 140.0, 40.0, 40.0, 40.0]
 LIFT_DAMPING = [65.0, 65.0, 65.0, 16.0, 16.0, 16.0]
 APPROACH_STIFFNESS = [180.0, 180.0, 180.0, 45.0, 45.0, 45.0]
@@ -308,6 +308,21 @@ def _actual_sampling_offset(
         -float(np.dot(label, y_axis)),
         -float(np.dot(label, z_axis)) - minimum_clearance_m,
     ]
+
+
+def _actual_sampling_tier(policy, sampling_offset_xyz) -> float | None:
+    """실제 port-local offset을 포함하는 가장 작은 near-port tier를 반환한다."""
+    if policy.collection_policy != "near-port":
+        return None
+    extent = max(abs(float(value)) for value in sampling_offset_xyz)
+    return next(
+        (
+            float(tier)
+            for tier in sorted(policy.sampling_tiers_m)
+            if extent <= float(tier)
+        ),
+        None,
+    )
 
 
 def _board_view_pose(policy, context, index: int):
@@ -1065,20 +1080,27 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 state["port_axis"],
                 0.0 if policy.collection_policy == "board-view" else sample["distance_m"],
             )
-            if sample["tier_m"] is not None and max(
-                abs(value) for value in sampling_offset_xyz
-            ) > sample["tier_m"]:
-                policy.get_logger().error(
-                    policy.log_text(
-                        "[PortOffsetCollect] CAPTURE FAILED: actual TF sampling offset is outside "
-                        f"the {sample['tier_m']*1e3:g}mm tier; "
-                        f"xyz=({sampling_offset_xyz[0]*1e3:+.3f}, "
-                        f"{sampling_offset_xyz[1]*1e3:+.3f}, "
-                        f"{sampling_offset_xyz[2]*1e3:+.3f})mm",
-                        "red",
-                    )
+            sample["actual_tier_m"] = _actual_sampling_tier(
+                policy, sampling_offset_xyz
+            )
+            if sample["tier_m"] != sample["actual_tier_m"]:
+                planned_tier = (
+                    "n/a"
+                    if sample["tier_m"] is None
+                    else f"{sample['tier_m'] * 1e3:g}mm"
                 )
-                continue
+                actual_tier = (
+                    "out-of-range"
+                    if sample["actual_tier_m"] is None
+                    else f"{sample['actual_tier_m'] * 1e3:g}mm"
+                )
+                policy.get_logger().info(
+                    "[PortOffsetCollect] sampling tier reclassified: "
+                    f"planned={planned_tier}, actual={actual_tier}, "
+                    f"xyz=({sampling_offset_xyz[0]*1e3:+.3f}, "
+                    f"{sampling_offset_xyz[1]*1e3:+.3f}, "
+                    f"{sampling_offset_xyz[2]*1e3:+.3f})mm"
+                )
             actual_view_distance_m = -float(
                 np.dot(np.asarray(label_xyz, dtype=float), state["port_axis"])
             )

@@ -949,6 +949,16 @@ def save_sample(
         for path in written:
             path.unlink(missing_ok=True)
         return False, f"세 camera 저장 불완전: details={failures}"
+    planned_tier_mm = (
+        float(sample["tier_m"] * 1000.0)
+        if sample["tier_m"] is not None
+        else None
+    )
+    actual_tier_mm = (
+        float(sample["actual_tier_m"] * 1000.0)
+        if sample.get("actual_tier_m") is not None
+        else None
+    )
     record = {
         "id": capture_id,
         "trial_id": trial_id,
@@ -958,11 +968,9 @@ def save_sample(
         "collection_policy": policy.collection_policy,
         "target_xyz_m": [float(value) for value in label_xyz],
         "sampling_offset_xyz_m": sample["actual_xyz_m"],
-        "sampling_tier_mm": (
-            float(sample["tier_m"] * 1000.0)
-            if sample["tier_m"] is not None
-            else None
-        ),
+        "sampling_tier_mm": planned_tier_mm,
+        "planned_sampling_tier_mm": planned_tier_mm,
+        "actual_sampling_tier_mm": actual_tier_mm,
         "view_distance_m": sample["actual_view_distance_m"],
         "capture_stamp_ns": capture_stamp,
         "max_sync_skew_ns": _max_skew(timestamps),
