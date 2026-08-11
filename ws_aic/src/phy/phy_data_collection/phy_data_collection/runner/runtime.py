@@ -391,6 +391,13 @@ def _policy_environment(
     )
     env["AIC_COLLECT_SETTLE_POLL_SEC"] = str(args.settle_poll_s)
     env["AIC_COLLECT_MAX_ATTEMPTS"] = str(args.max_attempts)
+    env["AIC_COLLECT_HAPTIC_GUARD"] = "true" if args.haptic_guard else "false"
+    env["AIC_COLLECT_HAPTIC_FORCE_THRESHOLD_N"] = str(
+        args.haptic_force_threshold_n
+    )
+    env["AIC_COLLECT_HAPTIC_CONTACT_DURATION_S"] = str(
+        args.haptic_contact_duration_s
+    )
     env["AIC_COLLECT_COLOR_LOG"] = "true" if args.color_log else "false"
     env["RMW_IMPLEMENTATION"] = env.get("RMW_IMPLEMENTATION", "rmw_zenoh_cpp")
     _apply_worker_isolation(env, args)

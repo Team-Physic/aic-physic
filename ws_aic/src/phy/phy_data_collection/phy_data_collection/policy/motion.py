@@ -419,6 +419,114 @@ def _tcp_pose(observation) -> Pose | None:
     return None if observation is None else _copy_pose(observation.controller_state.tcp_pose)
 
 
+def _wrist_force_in_base(observation) -> tuple[np.ndarray, int] | None:
+    """tare를 뺀 wrist force를 base_link 좌표계로 변환한다."""
+    if observation is None:
+        return None
+    wrist = getattr(observation, "wrist_wrench", None)
+    controller = getattr(observation, "controller_state", None)
+    if wrist is None or controller is None:
+        return None
+    raw = np.array(
+        [wrist.wrench.force.x, wrist.wrench.force.y, wrist.wrench.force.z],
+        dtype=float,
+    )
+    tare_force = controller.fts_tare_offset.wrench.force
+    tare = np.array([tare_force.x, tare_force.y, tare_force.z], dtype=float)
+    pose = controller.tcp_pose
+    rotation = quaternion_matrix(
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z,
+        pose.orientation.w,
+    )
+    force = rotation @ (raw - tare)
+    stamp = dataset._stamp_ns(getattr(wrist.header, "stamp", None))
+    if stamp is None or stamp <= 0 or not np.all(np.isfinite(force)):
+        return None
+    return force, stamp
+
+
+class HapticGuard:
+    """정지 baseline 대비 추가 force가 지속되는지 추적한다."""
+
+    def __init__(self, baseline_force: np.ndarray, threshold_n: float, duration_s: float):
+        self.baseline_force = np.asarray(baseline_force, dtype=float)
+        self.threshold_n = float(threshold_n)
+        self.duration_ns = int(float(duration_s) * 1e9)
+        self.last_stamp_ns = 0
+        self.above_since_ns: int | None = None
+        self.peak_delta_force_n = 0.0
+        self.last_delta_force_n = 0.0
+
+    @property
+    def baseline_force_n(self) -> float:
+        """정지 baseline force 벡터의 크기를 반환한다."""
+        return float(np.linalg.norm(self.baseline_force))
+
+    def observe(self, observation) -> bool:
+        """새 force frame을 반영하고 지속 임계치 초과 여부를 반환한다."""
+        reading = _wrist_force_in_base(observation)
+        if reading is None:
+            return False
+        force, stamp_ns = reading
+        if stamp_ns <= self.last_stamp_ns:
+            return False
+        self.last_stamp_ns = stamp_ns
+        self.last_delta_force_n = float(np.linalg.norm(force - self.baseline_force))
+        self.peak_delta_force_n = max(
+            self.peak_delta_force_n, self.last_delta_force_n
+        )
+        if self.last_delta_force_n <= self.threshold_n:
+            self.above_since_ns = None
+            return False
+        if self.above_since_ns is None or stamp_ns < self.above_since_ns:
+            self.above_since_ns = stamp_ns
+        return stamp_ns - self.above_since_ns >= self.duration_ns
+
+    def metrics(self) -> dict[str, float]:
+        """저장·로그에 사용할 haptic 측정값을 반환한다."""
+        return {
+            "baseline_force_n": self.baseline_force_n,
+            "peak_delta_force_n": self.peak_delta_force_n,
+            "last_delta_force_n": self.last_delta_force_n,
+        }
+
+
+def prepare_haptic_guard(policy, get_observation) -> HapticGuard | None:
+    """이동 직전 정지 force frame들의 중앙값으로 baseline을 만든다."""
+    samples: list[np.ndarray] = []
+    last_stamp_ns = 0
+    deadline = time.monotonic() + policy.haptic_baseline_timeout_s
+    while len(samples) < policy.haptic_baseline_samples and time.monotonic() <= deadline:
+        reading = _wrist_force_in_base(get_observation())
+        if reading is not None:
+            force, stamp_ns = reading
+            if stamp_ns != last_stamp_ns:
+                samples.append(force)
+                last_stamp_ns = stamp_ns
+        if len(samples) < policy.haptic_baseline_samples:
+            policy.sleep_for(policy.settle_poll_s)
+    if len(samples) < policy.haptic_baseline_samples:
+        policy.get_logger().error(
+            "[PortOffsetCollect] haptic baseline unavailable: "
+            f"frames={len(samples)}/{policy.haptic_baseline_samples}"
+        )
+        return None
+    guard = HapticGuard(
+        np.median(np.asarray(samples), axis=0),
+        policy.haptic_force_threshold_n,
+        policy.haptic_contact_duration_s,
+    )
+    vector = guard.baseline_force
+    policy.get_logger().info(
+        "[PortOffsetCollect] haptic baseline: "
+        f"force=({vector[0]:+.2f}, {vector[1]:+.2f}, {vector[2]:+.2f})N, "
+        f"magnitude={guard.baseline_force_n:.2f}N"
+    )
+    return guard
+
+
 def _pose_error(current: Pose, target: Pose) -> tuple[float, float]:
     """현재 TCP와 목표 pose의 위치·quaternion 각도 오차를 반환한다."""
     current_xyz = np.array([current.position.x, current.position.y, current.position.z])
@@ -445,7 +553,13 @@ def _controller_tracking_error(controller) -> tuple[float, float]:
     return float(np.linalg.norm(error[:3])), float(np.linalg.norm(error[3:]))
 
 
-def wait_for_pose_convergence(policy, get_observation, target: Pose, command_stamp_ns: int):
+def wait_for_pose_convergence(
+    policy,
+    get_observation,
+    target: Pose,
+    command_stamp_ns: int,
+    haptic_guard: HapticGuard | None = None,
+):
     """controller reference와 실제 TCP 움직임이 함께 멈출 때까지 기다린다."""
     start_ns = time.monotonic_ns()
     deadline_ns = start_ns + int(policy.settle_timeout_s * 1e9)
@@ -461,6 +575,19 @@ def wait_for_pose_convergence(policy, get_observation, target: Pose, command_sta
     command_orientation_delta = float("inf")
     while time.monotonic_ns() <= deadline_ns:
         observation = get_observation()
+        if haptic_guard is not None and haptic_guard.observe(observation):
+            return None, {
+                "failure_reason": "haptic_contact",
+                "position_error_m": position_delta,
+                "orientation_error_rad": orientation_delta,
+                "tracking_position_error_m": tracking_position_error,
+                "tracking_orientation_error_rad": tracking_orientation_error,
+                "command_position_delta_m": command_position_delta,
+                "command_orientation_delta_rad": command_orientation_delta,
+                "wait_ns": time.monotonic_ns() - start_ns,
+                "stable_observations": stable,
+                **haptic_guard.metrics(),
+            }
         controller = getattr(observation, "controller_state", None)
         header = getattr(controller, "header", None)
         stamp = dataset._stamp_ns(getattr(header, "stamp", None))
@@ -513,7 +640,20 @@ def wait_for_pose_convergence(policy, get_observation, target: Pose, command_sta
     }
 
 
-def _follow(policy, move_robot, start: Pose, target: Pose, steps: int, dt: float, label: str, stiffness, damping):
+def _follow(
+    policy,
+    move_robot,
+    start: Pose,
+    target: Pose,
+    steps: int,
+    dt: float,
+    label: str,
+    stiffness,
+    damping,
+    *,
+    get_observation=None,
+    haptic_guard: HapticGuard | None = None,
+) -> bool:
     """현재 TCP에서 목표 pose까지 S-curve 위치·자세 명령을 보낸다."""
     start_xyz = np.array([start.position.x, start.position.y, start.position.z])
     target_xyz = np.array([target.position.x, target.position.y, target.position.z])
@@ -537,6 +677,57 @@ def _follow(policy, move_robot, start: Pose, target: Pose, steps: int, dt: float
                 f"tcp=({xyz[0]:+.4f}, {xyz[1]:+.4f}, {xyz[2]:+.4f})"
             )
         policy.sleep_for(dt)
+        observation = get_observation() if haptic_guard is not None else None
+        if haptic_guard is not None and haptic_guard.observe(observation):
+            current = _tcp_pose(observation)
+            if current is not None:
+                policy.set_pose_target(move_robot, current, stiffness, damping)
+            policy.get_logger().error(
+                "[PortOffsetCollect] HAPTIC CONTACT: "
+                f"stage={label}, delta={haptic_guard.last_delta_force_n:.2f}N, "
+                f"peak={haptic_guard.peak_delta_force_n:.2f}N, "
+                f"threshold={haptic_guard.threshold_n:.2f}N"
+            )
+            return False
+    return True
+
+
+def retreat_to_pose(policy, get_observation, move_robot, target: Pose, stiffness, damping) -> bool:
+    """접촉 시 현재 자세에서 직전 출발 자세로 역경로 후퇴한다."""
+    current = _tcp_pose(get_observation())
+    if current is None:
+        policy.get_logger().error(
+            "[PortOffsetCollect] haptic retreat failed: missing TCP pose"
+        )
+        return False
+    distance = float(
+        np.linalg.norm(
+            np.array(
+                [
+                    target.position.x - current.position.x,
+                    target.position.y - current.position.y,
+                    target.position.z - current.position.z,
+                ]
+            )
+        )
+    )
+    steps = min(120, max(10, int(np.ceil(distance / 0.003))))
+    policy.get_logger().info(
+        f"[PortOffsetCollect] haptic retreat: distance={distance * 1e3:.1f}mm"
+    )
+    followed = _follow(
+        policy,
+        move_robot,
+        current,
+        target,
+        steps,
+        0.03,
+        "haptic_retreat",
+        stiffness,
+        damping,
+    )
+    policy.sleep_for(0.3)
+    return followed
 
 
 def control_for(task) -> dict[str, list[float]]:
@@ -599,10 +790,29 @@ def approach(policy, context, get_observation, move_robot) -> bool:
     policy.get_logger().info(
         f"[PortOffsetCollect] approach target=({xyz[0]:+.4f}, {xyz[1]:+.4f}, {xyz[2]:+.4f})"
     )
-    _follow(
+    guard = (
+        prepare_haptic_guard(policy, get_observation)
+        if policy.haptic_guard_enabled
+        else None
+    )
+    if policy.haptic_guard_enabled and guard is None:
+        return False
+    if not _follow(
         policy, move_robot, start, target, APPROACH_STEPS, APPROACH_DT, "approach",
         context["approach_stiffness"], context["approach_damping"],
-    )
+        get_observation=get_observation,
+        haptic_guard=guard,
+    ):
+        context["counts"]["haptic_contacts"] += 1
+        retreat_to_pose(
+            policy,
+            get_observation,
+            move_robot,
+            start,
+            context["approach_stiffness"],
+            context["approach_damping"],
+        )
+        return False
     policy.sleep_for(APPROACH_SETTLE_S)
     context["counts"]["approach"] += 1
     return True
@@ -691,13 +901,21 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 f"xyz=({sample['x_m']*1e3:+.1f}, {sample['y_m']*1e3:+.1f}, {sample['z_m']*1e3:+.1f})mm "
                 f"rpy=({sample['roll_rad']:+.4f}, {sample['pitch_rad']:+.4f}, {sample['yaw_rad']:+.4f})rad"
             )
+            start = _tcp_pose(get_observation())
+            if start is None:
+                policy.get_logger().error(
+                    "[PortOffsetCollect] view move failed: missing TCP pose"
+                )
+                continue
+            guarded_policy = policy.collection_policy in {"near-port", "descent"}
+            haptic_guard = (
+                prepare_haptic_guard(policy, get_observation)
+                if policy.haptic_guard_enabled and guarded_policy
+                else None
+            )
+            if policy.haptic_guard_enabled and guarded_policy and haptic_guard is None:
+                continue
             if policy.collection_policy != "near-port":
-                start = _tcp_pose(get_observation())
-                if start is None:
-                    policy.get_logger().error(
-                        "[PortOffsetCollect] view move failed: missing TCP pose"
-                    )
-                    continue
                 distance = float(
                     np.linalg.norm(
                         np.array(
@@ -710,7 +928,7 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                     )
                 )
                 steps = min(120, max(10, int(np.ceil(distance / 0.003))))
-                _follow(
+                if not _follow(
                     policy,
                     move_robot,
                     start,
@@ -720,14 +938,60 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                     policy.collection_policy,
                     context["collect_stiffness"],
                     context["collect_damping"],
-                )
+                    get_observation=get_observation,
+                    haptic_guard=haptic_guard,
+                ):
+                    context["counts"]["haptic_contacts"] += 1
+                    retreat_to_pose(
+                        policy,
+                        get_observation,
+                        move_robot,
+                        start,
+                        context["collect_stiffness"],
+                        context["collect_damping"],
+                    )
+                    waypoint_index += 1
+                    sample_attempts = 0
+                    continue
             command_stamp = policy.set_pose_target(
                 move_robot, pose, context["collect_stiffness"], context["collect_damping"]
             )
             settled_stamp, settle = wait_for_pose_convergence(
-                policy, get_observation, pose, command_stamp
+                policy,
+                get_observation,
+                pose,
+                command_stamp,
+                haptic_guard=haptic_guard,
             )
             if settled_stamp is None:
+                if settle.get("failure_reason") == "haptic_contact":
+                    current = _tcp_pose(get_observation())
+                    if current is not None:
+                        policy.set_pose_target(
+                            move_robot,
+                            current,
+                            context["collect_stiffness"],
+                            context["collect_damping"],
+                        )
+                    context["counts"]["haptic_contacts"] += 1
+                    policy.get_logger().error(
+                        "[PortOffsetCollect] HAPTIC CONTACT: "
+                        f"stage={policy.collection_policy}_settle, "
+                        f"delta={settle['last_delta_force_n']:.2f}N, "
+                        f"peak={settle['peak_delta_force_n']:.2f}N, "
+                        f"threshold={policy.haptic_force_threshold_n:.2f}N"
+                    )
+                    retreat_to_pose(
+                        policy,
+                        get_observation,
+                        move_robot,
+                        start,
+                        context["collect_stiffness"],
+                        context["collect_damping"],
+                    )
+                    waypoint_index += 1
+                    sample_attempts = 0
+                    continue
                 policy.get_logger().error(
                     policy.log_text(
                         "[PortOffsetCollect] CAPTURE FAILED: pose convergence timeout; "
@@ -739,6 +1003,8 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                     )
                 )
                 continue
+            if haptic_guard is not None:
+                sample["haptic"] = haptic_guard.metrics()
             policy.get_logger().info(
                 "[PortOffsetCollect] pose settled: "
                 f"motion={settle['position_error_m']*1e3:.3f}mm/"

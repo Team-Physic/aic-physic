@@ -496,6 +496,10 @@ def _prepare_args(args: argparse.Namespace) -> None:
         raise ValueError("worker Zenoh ports must be in [1024, 65535]")
     if args.settle_stable_observations < 1 or args.max_attempts < 1:
         raise ValueError("settle-stable-observations and max-attempts are invalid")
+    if args.haptic_force_threshold_n <= 0.0 or args.haptic_contact_duration_s <= 0.0:
+        raise ValueError(
+            "haptic-force-threshold-n and haptic-contact-duration-s must be positive"
+        )
     if args.cleanup_only:
         return
     if not args.dataset_version.strip():

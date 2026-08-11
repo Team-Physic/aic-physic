@@ -134,7 +134,7 @@ def _add_pose_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_sync_args(parser: argparse.ArgumentParser) -> None:
-    """sample timestamp 허용 오차와 늦은 source 대기시간을 추가한다."""
+    """sample 동기화·pose 수렴·접촉 감지 인자를 추가한다."""
     _add_argument(parser, "sync_tolerance_ms", type=float)
     _add_argument(parser, "sync_wait_timeout_s", type=float)
     _add_argument(parser, "settle_timeout_s", type=float)
@@ -143,6 +143,9 @@ def _add_sync_args(parser: argparse.ArgumentParser) -> None:
     _add_argument(parser, "settle_stable_observations", type=int)
     _add_argument(parser, "settle_poll_s", type=float)
     _add_argument(parser, "max_attempts", type=int)
+    _add_argument(parser, "haptic_guard", type=_parse_bool, metavar=BOOLEAN_METAVAR)
+    _add_argument(parser, "haptic_force_threshold_n", type=float)
+    _add_argument(parser, "haptic_contact_duration_s", type=float)
 
 
 def _add_world_args(parser: argparse.ArgumentParser) -> None:

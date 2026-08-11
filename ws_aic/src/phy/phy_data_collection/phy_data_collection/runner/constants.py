@@ -121,6 +121,9 @@ CLI_DEFAULTS = {
     "settle_stable_observations": 3,
     "settle_poll_s": 0.02,
     "max_attempts": 2,
+    "haptic_guard": True,
+    "haptic_force_threshold_n": 20.0,
+    "haptic_contact_duration_s": 0.2,
     # World and lighting.
     "randomize_lighting": True,
     "light_intensity_scale_min": 0.65,

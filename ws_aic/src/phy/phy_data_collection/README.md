@@ -214,6 +214,9 @@ translation과 RPY는 모두 0이지만 port와의 안전거리 20mm는 유지�
 | `--settle-stable-observations` | `3` | 연속으로 통과해야 하는 서로 다른 controller frame 수 |
 | `--settle-poll-s` | `0.02` | pose 수렴 여부를 다시 확인하는 polling 간격(초) |
 | `--max-attempts` | `2` | 가시성 실패를 제외한 동일 waypoint의 최대 capture 시도 횟수 |
+| `--haptic-guard` | `true` | near-port/descent 이동 중 F/T 접촉 감지와 후퇴 사용 여부 |
+| `--haptic-force-threshold-n` | `20` | 정지 baseline 대비 추가 force 크기 임계치 |
+| `--haptic-contact-duration-s` | `0.2` | 임계치가 연속 유지되어야 하는 시간 |
 
 세 image의 `header.stamp`가 정확히 같고 controller가 허용 오차 안에 있는 Observation만
 사용합니다. 공통 capture stamp로 plug TF를 한 번 조회하여 하나의 `target_xyz_m`을
@@ -233,6 +236,12 @@ capture 수가 목표보다 적으면 새 waypoint 묶음을 생성해 계속 �
 사용하지 않고 controller reference와 실제 TCP 움직임이 수렴한 이후의 다음 camera
 frame을 선택합니다. 조건을 통과하지 못한 tier는 재시도하며 목표 capture 수를 채우지
 못한 trial은 실패 처리합니다.
+
+near-port와 descent는 이동 직전 10개 F/T frame의 중앙값을 정지 baseline으로
+사용합니다. raw force에서 controller tare를 뺀 뒤 `base_link`로 회전하고, 이 값에서
+baseline 벡터를 빼므로 cable 등의 정적 하중은 접촉 force에 포함하지 않습니다. 보정
+force가 임계치를 지정 시간 이상 넘으면 현재 자세에서 정지하고 출발 자세로 후퇴한 뒤
+해당 waypoint를 건너뜁니다.
 
 임피던스 제어에서는 외력과 유한 stiffness 때문에 reference와 실제 TCP 사이에
 정상상태 tracking error가 남을 수 있습니다. 이 값은 log 진단용으로만 기록하고 동작
@@ -397,6 +406,7 @@ keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(
 | `capture_stamp_ns` | 묶인 camera images의 공통 촬영 ROS 시각 |
 | `max_sync_skew_ns` | 승인 source들의 최대 시각 차이 |
 | `settle_*` | 촬영 전 연속 controller frame 간 최종 TCP 이동량과 대기시간 |
+| `haptic_baseline_force_n`, `haptic_peak_delta_force_n` | 이동 직전 정적 하중과 승인 전 최대 보정 force |
 
 같은 trial의 모든 capture는 같은 split에 배정됩니다. 기본 34 trial은 정확히
 24 train, 5 validation, 5 test로 배정됩니다. command pose, RPY,

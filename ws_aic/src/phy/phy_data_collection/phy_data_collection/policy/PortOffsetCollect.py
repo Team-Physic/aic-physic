@@ -168,6 +168,19 @@ class PortOffsetCollect(Policy):
         self.max_attempts = max(
             1, int(_env_float("AIC_COLLECT_MAX_ATTEMPTS", 2.0))
         )
+        self.haptic_guard_enabled = _env_bool("AIC_COLLECT_HAPTIC_GUARD", True)
+        self.haptic_force_threshold_n = max(
+            0.0, _env_float("AIC_COLLECT_HAPTIC_FORCE_THRESHOLD_N", 20.0)
+        )
+        self.haptic_contact_duration_s = max(
+            0.0, _env_float("AIC_COLLECT_HAPTIC_CONTACT_DURATION_S", 0.2)
+        )
+        self.haptic_baseline_samples = max(
+            3, int(_env_float("AIC_COLLECT_HAPTIC_BASELINE_SAMPLES", 10.0))
+        )
+        self.haptic_baseline_timeout_s = max(
+            0.1, _env_float("AIC_COLLECT_HAPTIC_BASELINE_TIMEOUT_S", 2.0)
+        )
         self.color_log = _env_bool("AIC_COLLECT_COLOR_LOG", True) and not os.environ.get("NO_COLOR")
         self.rng = np.random.default_rng(
             _env_optional_int("AIC_COLLECT_RANDOM_SEED")
@@ -301,7 +314,8 @@ class PortOffsetCollect(Policy):
             f"[PortOffsetCollect] Ready: policy={self.collection_policy}, "
             f"steps={self.collect_steps}, "
             f"dataset={self.dataset_dir}, split={self.trial_split or 'hash'}, "
-            f"depth_visibility={self.auto_annotation_visibility}"
+            f"depth_visibility={self.auto_annotation_visibility}, "
+            f"haptic_guard={self.haptic_guard_enabled}"
         )
 
     def _on_depth_image(self, camera: str, message: Image) -> None:
@@ -510,6 +524,7 @@ class PortOffsetCollect(Policy):
             "approach_steps": counts["approach"],
             "collect_steps": counts["collect"],
             "collect_attempts": counts["attempts"],
+            "haptic_contacts": counts["haptic_contacts"],
         }
         summary_path = episode_dir / "episode_summary.json"
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -530,7 +545,13 @@ class PortOffsetCollect(Policy):
         episode_name = time.strftime("%Y%m%d_%H%M%S") + f"_{task.id}"
         episode_dir = self.capture_root / episode_name
         episode_dir.mkdir(parents=True, exist_ok=True)
-        counts = {"lift_up": 0, "approach": 0, "collect": 0, "attempts": 0}
+        counts = {
+            "lift_up": 0,
+            "approach": 0,
+            "collect": 0,
+            "attempts": 0,
+            "haptic_contacts": 0,
+        }
         if not self.record:
             return self._finish(episode_dir, task, counts, "recording_disabled")
 

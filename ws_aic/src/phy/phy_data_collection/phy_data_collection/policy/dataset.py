@@ -773,6 +773,15 @@ def write_manifest(policy) -> None:
             + ", ".join(f"{value * 1000.0:g}" for value in policy.sampling_tiers_m)
             + "]"
         )
+    if policy.collection_policy in {"descent", "near-port"}:
+        sampling.extend(
+            [
+                f"  haptic_guard: {str(policy.haptic_guard_enabled).lower()}",
+                f"  haptic_force_threshold_n: {policy.haptic_force_threshold_n:g}",
+                f"  haptic_contact_duration_s: {policy.haptic_contact_duration_s:g}",
+                f"  haptic_baseline_samples: {policy.haptic_baseline_samples}",
+            ]
+        )
     auto_annotate_ports = bool(getattr(policy, "auto_annotate_ports", False))
     depth_visibility = bool(
         getattr(policy, "auto_annotation_visibility", False)
@@ -961,6 +970,12 @@ def save_sample(
         "settle_orientation_error_rad": float(settle["orientation_error_rad"]),
         "settle_wait_ms": float(settle["wait_ns"] / 1e6),
     }
+    haptic = sample.get("haptic")
+    if haptic is not None:
+        record["haptic_baseline_force_n"] = float(haptic["baseline_force_n"])
+        record["haptic_peak_delta_force_n"] = float(
+            haptic["peak_delta_force_n"]
+        )
     if auto_annotate_ports:
         record["annotations"] = annotations
         record["annotation_format"] = "yolo_pose"
