@@ -221,8 +221,19 @@ class PortOffsetCollect(Policy):
         ).expanduser()
         self.dataset_version = os.environ.get("AIC_IMG2POS_DATASET_VERSION", "").strip()
         self.samples_path = self.dataset_dir / "samples.jsonl"
+        self.trials_path = self.dataset_dir / "trials.jsonl"
+        self.constants_path = self.dataset_dir / "constants.json"
         self.run_id = os.environ.get("AIC_PORTOFFSET_RUN_ID", "").strip()
         self.trial_index = _env_optional_int("AIC_PORTOFFSET_TRIAL_INDEX")
+        try:
+            trial_metadata = json.loads(
+                os.environ.get("AIC_IMG2POS_TRIAL_METADATA_JSON", "{}")
+            )
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid AIC_IMG2POS_TRIAL_METADATA_JSON") from exc
+        if not isinstance(trial_metadata, dict):
+            raise ValueError("AIC_IMG2POS_TRIAL_METADATA_JSON must be an object")
+        self.trial_metadata = trial_metadata
         self.val_ratio = _env_float("AIC_IMG2POS_VAL_RATIO", 0.15)
         self.test_ratio = _env_float("AIC_IMG2POS_TEST_RATIO", 0.15)
         self.trial_split = os.environ.get("AIC_IMG2POS_TRIAL_SPLIT", "").strip().lower()

@@ -17,6 +17,7 @@ import cv2
 import numpy as np
 from geometry_msgs.msg import Transform
 
+from . import se3
 from .geometry import pose_matrix, quaternion_matrix
 
 
@@ -46,6 +47,66 @@ PORT_OUTER_SIZE_M = {
     "sfp": (0.016224, 0.013698),
     "sc": (0.025781, 0.009300),
 }
+POSE_RECONSTRUCTION_ATOL = 1e-9
+DATASET_SCHEMA_VERSION = 10
+TRIAL_CONSTANT_TRANSLATION_ATOL_M = 1e-5
+TRIAL_CONSTANT_ROTATION_ATOL_RAD = 1e-4
+CONNECTOR_CONSTANT_TRANSLATION_ATOL_M = 1e-9
+CONNECTOR_CONSTANT_ROTATION_ATOL_RAD = 1e-9
+
+
+def _transform_message_matrix(transform: Transform) -> np.ndarray:
+    """geometry_msgs/Transform을 4x4 homogeneous transform으로 변환한다."""
+    return se3.transform_matrix(
+        [transform.translation.x, transform.translation.y, transform.translation.z],
+        [
+            transform.rotation.x,
+            transform.rotation.y,
+            transform.rotation.z,
+            transform.rotation.w,
+        ],
+    )
+
+
+def pose_residual_labels(
+    *,
+    base_tcp: np.ndarray,
+    base_cameras: dict[str, np.ndarray],
+    base_plug_tip: np.ndarray,
+    base_plug_reference: np.ndarray,
+    base_port_entrance: np.ndarray,
+) -> tuple[dict[str, Any], dict[str, Any], float]:
+    """pure SE(3) helper를 dataset API로 노출한다."""
+    return se3.pose_residual_labels(
+        base_tcp=base_tcp,
+        base_cameras=base_cameras,
+        base_plug_tip=base_plug_tip,
+        base_plug_reference=base_plug_reference,
+        base_port_entrance=base_port_entrance,
+    )
+
+
+def capture_pose_residual_labels(
+    policy,
+    observation,
+    plug_tip_tf: Transform,
+    plug_reference_tf: Transform,
+    port_tf: Transform,
+) -> tuple[dict[str, Any], dict[str, Any], float]:
+    """동기화 observation과 TF에서 sample pose/residual label을 생성한다."""
+    base_tcp = pose_matrix(observation.controller_state.tcp_pose)
+    base_tool0 = base_tcp @ np.linalg.inv(policy._tool0_tcp)
+    base_cameras = {
+        camera: base_tool0 @ policy._tool0_optical[camera]
+        for camera in ("left", "center", "right")
+    }
+    return pose_residual_labels(
+        base_tcp=base_tcp,
+        base_cameras=base_cameras,
+        base_plug_tip=_transform_message_matrix(plug_tip_tf),
+        base_plug_reference=_transform_message_matrix(plug_reference_tf),
+        base_port_entrance=_transform_message_matrix(port_tf),
+    )
 
 
 def port_annotation_class(port_type: str, rail: int, port: int = 0) -> tuple[int, str]:
@@ -729,6 +790,374 @@ def _dataset_write_lock(policy):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    """JSON object를 같은 directory의 임시 파일을 거쳐 원자적으로 교체한다."""
+    temporary = path.parent / f".{path.name}.{os.getpid()}.tmp"
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _camera_calibration_record(observation, camera: str) -> dict[str, Any]:
+    """RGB image 해상도에 맞춘 ROS CameraInfo calibration을 직렬화한다."""
+    image = image_for_camera(observation, camera)
+    camera_info = camera_info_for(observation, camera)
+    intrinsic = _camera_matrix(camera_info, image)
+    if image is None or camera_info is None or intrinsic is None:
+        raise ValueError(f"{camera}: camera calibration을 만들 수 없음")
+
+    source_width = int(getattr(camera_info, "width", 0))
+    source_height = int(getattr(camera_info, "height", 0))
+    image_width = int(getattr(image, "width", 0))
+    image_height = int(getattr(image, "height", 0))
+    if min(source_width, source_height, image_width, image_height) <= 0:
+        raise ValueError(f"{camera}: invalid camera/image size")
+    scale = np.diag(
+        [image_width / source_width, image_height / source_height, 1.0]
+    )
+    projection_values = list(getattr(camera_info, "p", ()))
+    projection = (
+        scale @ np.asarray(projection_values, dtype=float).reshape(3, 4)
+        if len(projection_values) == 12
+        else np.column_stack((intrinsic, np.zeros(3, dtype=float)))
+    )
+    rectification_values = list(getattr(camera_info, "r", ()))
+    rectification = (
+        np.asarray(rectification_values, dtype=float).reshape(3, 3)
+        if len(rectification_values) == 9
+        else np.eye(3, dtype=float)
+    )
+    header = getattr(camera_info, "header", None)
+    roi = getattr(camera_info, "roi", None)
+    return {
+        "frame_id": str(getattr(header, "frame_id", "")),
+        "image_size_px": [image_width, image_height],
+        "distortion_model": str(
+            getattr(camera_info, "distortion_model", "")
+        ),
+        "D": [float(value) for value in getattr(camera_info, "d", ())],
+        "K": [float(value) for value in intrinsic.reshape(-1)],
+        "R": [float(value) for value in rectification.reshape(-1)],
+        "P": [float(value) for value in projection.reshape(-1)],
+        "binning": [
+            int(getattr(camera_info, "binning_x", 0)),
+            int(getattr(camera_info, "binning_y", 0)),
+        ],
+        "roi": {
+            "x_offset": int(getattr(roi, "x_offset", 0)),
+            "y_offset": int(getattr(roi, "y_offset", 0)),
+            "height": int(getattr(roi, "height", 0)),
+            "width": int(getattr(roi, "width", 0)),
+            "do_rectify": bool(getattr(roi, "do_rectify", False)),
+        },
+    }
+
+
+def _dataset_constants_candidate(policy, observation) -> dict[str, Any]:
+    """dataset 전체에서 공유하는 camera와 좌표계 상수를 만든다."""
+    return {
+        "schema_version": DATASET_SCHEMA_VERSION,
+        "pose_convention": "parent_T_child",
+        "pose_representation": "translation_m + quaternion_xyzw",
+        "se3": {
+            "encoding": "se3_log_identity_reference",
+            "order": list(se3.SE3_LOG_ORDER),
+            "reconstruction_tolerance": POSE_RECONSTRUCTION_ATOL,
+        },
+        "constant_validation": {
+            "connector_translation_tolerance_m": (
+                CONNECTOR_CONSTANT_TRANSLATION_ATOL_M
+            ),
+            "connector_rotation_tolerance_rad": (
+                CONNECTOR_CONSTANT_ROTATION_ATOL_RAD
+            ),
+            "trial_translation_tolerance_m": TRIAL_CONSTANT_TRANSLATION_ATOL_M,
+            "trial_rotation_tolerance_rad": TRIAL_CONSTANT_ROTATION_ATOL_RAD,
+        },
+        "static_transforms": {
+            "tool0_T_tcp": se3.pose_record(policy._tool0_tcp),
+            "tool0_T_camera_optical": {
+                camera: se3.pose_record(policy._tool0_optical[camera])
+                for camera in ("left", "center", "right")
+            },
+        },
+        "camera_calibration": {
+            camera: _camera_calibration_record(observation, camera)
+            for camera in ("left", "center", "right")
+        },
+        "connector_geometry": {},
+    }
+
+
+def _transform_error(
+    reference: np.ndarray,
+    actual: np.ndarray,
+) -> tuple[float, float, np.ndarray]:
+    """reference^{-1} actual의 translation/rotation 크기와 SE(3) log를 반환한다."""
+    delta = np.linalg.inv(reference) @ actual
+    residual = se3.se3_log(delta)
+    return (
+        float(np.linalg.norm(delta[:3, 3])),
+        float(np.linalg.norm(residual[3:])),
+        residual,
+    )
+
+
+def _verify_same_constants(
+    existing: dict[str, Any],
+    candidate: dict[str, Any],
+) -> None:
+    """worker마다 관측한 dataset 공통 상수가 완전히 같은지 검사한다."""
+    for key in (
+        "schema_version",
+        "pose_convention",
+        "pose_representation",
+        "se3",
+        "constant_validation",
+        "static_transforms",
+        "camera_calibration",
+    ):
+        if existing.get(key) != candidate.get(key):
+            raise ValueError(f"dataset constant mismatch: {key}")
+
+
+def _ensure_dataset_constants(
+    policy,
+    observation,
+    connector: str,
+    plug_tip_reference: np.ndarray,
+) -> np.ndarray:
+    """constants.json을 생성/검증하고 connector 기준 변환을 반환한다."""
+    candidate = _dataset_constants_candidate(policy, observation)
+    path = policy.constants_path
+    with _dataset_write_lock(policy):
+        if path.is_file():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(existing, dict):
+                raise ValueError("constants.json must contain an object")
+            _verify_same_constants(existing, candidate)
+        else:
+            existing = candidate
+
+        geometries = existing.setdefault("connector_geometry", {})
+        geometry = geometries.get(connector)
+        if geometry is None:
+            geometries[connector] = {
+                "plug_tip_T_plug_reference": se3.pose_record(
+                    plug_tip_reference
+                )
+            }
+            _atomic_write_json(path, existing)
+            return plug_tip_reference
+
+        nominal = se3.matrix_from_pose_record(
+            geometry["plug_tip_T_plug_reference"]
+        )
+        translation_error, rotation_error, _ = _transform_error(
+            nominal, plug_tip_reference
+        )
+        if (
+            translation_error > CONNECTOR_CONSTANT_TRANSLATION_ATOL_M
+            or rotation_error > CONNECTOR_CONSTANT_ROTATION_ATOL_RAD
+        ):
+            raise ValueError(
+                "connector constant mismatch: "
+                f"{connector} plug_tip_T_plug_reference "
+                f"translation={translation_error:.3e}m, "
+                f"rotation={rotation_error:.3e}rad"
+            )
+        if not path.is_file():
+            _atomic_write_json(path, existing)
+        return nominal
+
+
+def _read_trial_record(path: Path, trial_id: str) -> dict[str, Any] | None:
+    """trials.jsonl에서 지정 trial row를 찾아 반환한다."""
+    if not path.is_file():
+        return None
+    match = None
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError(f"{path}:{line_number}: expected object")
+            if str(row.get("trial_id")) != trial_id:
+                continue
+            if match is not None:
+                raise ValueError(f"duplicate trial row: {trial_id}")
+            match = row
+    return match
+
+
+def _ensure_trial_record(
+    policy,
+    *,
+    trial_id: str,
+    split: str,
+    task,
+    connector: str,
+    base_port: np.ndarray,
+    tcp_plug_reference: np.ndarray,
+    port_stamp_ns: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """trial 상수를 한 번 기록하고 매 capture의 상수 drift residual을 반환한다."""
+    cached = getattr(policy, "_normalized_trial_record", None)
+    if cached is None:
+        candidate = {
+            "trial_id": trial_id,
+            "run_id": policy.run_id,
+            "trial_index": policy.trial_index,
+            "task_id": str(getattr(task, "id", "")),
+            "split": split,
+            "connector": connector,
+            "collection_policy": policy.collection_policy,
+            "scenario": policy.trial_metadata,
+            "pose_source_stamps_ns": {"port_tf": int(port_stamp_ns)},
+            "poses": {
+                "base_T_port_entrance": se3.pose_record(base_port),
+            },
+            "transforms": {
+                "tcp_T_plug_reference_nominal": se3.pose_record(
+                    tcp_plug_reference
+                ),
+            },
+        }
+        with _dataset_write_lock(policy):
+            existing = _read_trial_record(policy.trials_path, trial_id)
+            if existing is None:
+                with policy.trials_path.open("a", encoding="utf-8") as stream:
+                    stream.write(
+                        json.dumps(candidate, ensure_ascii=False) + "\n"
+                    )
+                existing = candidate
+            elif existing != candidate:
+                raise ValueError(f"trial constant mismatch: {trial_id}")
+        policy._normalized_trial_record = existing
+        cached = existing
+
+    nominal_port = se3.matrix_from_pose_record(
+        cached["poses"]["base_T_port_entrance"]
+    )
+    nominal_tcp_plug = se3.matrix_from_pose_record(
+        cached["transforms"]["tcp_T_plug_reference_nominal"]
+    )
+    port_translation_error, port_rotation_error, port_delta = _transform_error(
+        nominal_port, base_port
+    )
+    tcp_translation_error, tcp_rotation_error, tcp_delta = _transform_error(
+        nominal_tcp_plug, tcp_plug_reference
+    )
+    if max(port_translation_error, tcp_translation_error) > TRIAL_CONSTANT_TRANSLATION_ATOL_M:
+        raise ValueError(
+            "trial translation constant drift: "
+            f"port={port_translation_error:.3e}m, "
+            f"tcp_plug={tcp_translation_error:.3e}m"
+        )
+    if max(port_rotation_error, tcp_rotation_error) > TRIAL_CONSTANT_ROTATION_ATOL_RAD:
+        raise ValueError(
+            "trial rotation constant drift: "
+            f"port={port_rotation_error:.3e}rad, "
+            f"tcp_plug={tcp_rotation_error:.3e}rad"
+        )
+    return nominal_port, nominal_tcp_plug, port_delta, tcp_delta
+
+
+def _log_only(record: dict[str, Any]) -> dict[str, list[float]]:
+    """상대 transform record에서 학습·역산에 필요한 SE(3) log만 남긴다."""
+    return {
+        "se3_log_vw": [float(value) for value in record["se3_log_vw"]]
+    }
+
+
+def _normalized_sample_residuals(
+    residuals: dict[str, Any],
+    *,
+    connector_delta: np.ndarray,
+    port_delta: np.ndarray,
+    tcp_plug_delta: np.ndarray,
+) -> dict[str, Any]:
+    """dataset/trial 상수를 제외한 capture별 residual만 직렬화한다."""
+    return {
+        "constant_deltas": {
+            "plug_tip_T_plug_reference": {
+                "se3_log_vw": [float(value) for value in connector_delta]
+            },
+        },
+        "trial_deltas": {
+            "base_T_port_entrance": {
+                "se3_log_vw": [float(value) for value in port_delta]
+            },
+            "tcp_T_plug_reference": {
+                "se3_log_vw": [float(value) for value in tcp_plug_delta]
+            },
+        },
+        "plug_reference_T_port_entrance": _log_only(
+            residuals["plug_reference_T_port_entrance"]
+        ),
+        "camera_T_plug_reference": {
+            camera: _log_only(record)
+            for camera, record in residuals["camera_T_plug_reference"].items()
+        },
+        "camera_T_port_entrance": {
+            camera: _log_only(record)
+            for camera, record in residuals["camera_T_port_entrance"].items()
+        },
+    }
+
+
+def _normalized_reconstruction_error(
+    *,
+    poses: dict[str, Any],
+    residuals: dict[str, Any],
+    nominal_connector: np.ndarray,
+    nominal_port: np.ndarray,
+    nominal_tcp_plug: np.ndarray,
+) -> float:
+    """constants+trial+sample 세 파일을 합쳤을 때의 최대 pose 역산 오차를 계산한다."""
+    base_tcp = se3.matrix_from_pose_record(poses["base_T_tcp"])
+    base_tip = se3.matrix_from_pose_record(poses["base_T_plug_tip"])
+    base_plug = se3.matrix_from_pose_record(poses["base_T_plug_reference"])
+    base_cameras = {
+        camera: se3.matrix_from_pose_record(record)
+        for camera, record in poses["base_T_cameras"].items()
+    }
+    connector_delta = se3.se3_exp(
+        residuals["constant_deltas"]["plug_tip_T_plug_reference"][
+            "se3_log_vw"
+        ]
+    )
+    port_delta = se3.se3_exp(
+        residuals["trial_deltas"]["base_T_port_entrance"]["se3_log_vw"]
+    )
+    tcp_delta = se3.se3_exp(
+        residuals["trial_deltas"]["tcp_T_plug_reference"]["se3_log_vw"]
+    )
+    base_port = nominal_port @ port_delta
+    errors = [
+        float(np.max(np.abs(base_tip @ nominal_connector @ connector_delta - base_plug))),
+        float(np.max(np.abs(base_tcp @ nominal_tcp_plug @ tcp_delta - base_plug))),
+    ]
+
+    plug_port = se3.se3_exp(
+        residuals["plug_reference_T_port_entrance"]["se3_log_vw"]
+    )
+    errors.append(float(np.max(np.abs(base_plug @ plug_port - base_port))))
+    for camera, base_camera in base_cameras.items():
+        camera_plug = se3.se3_exp(
+            residuals["camera_T_plug_reference"][camera]["se3_log_vw"]
+        )
+        camera_port = se3.se3_exp(
+            residuals["camera_T_port_entrance"][camera]["se3_log_vw"]
+        )
+        errors.append(float(np.max(np.abs(base_camera @ camera_plug - base_plug))))
+        errors.append(float(np.max(np.abs(base_camera @ camera_port - base_port))))
+    return max(errors, default=0.0)
+
+
 def _write_yolo_pose_config(policy) -> None:
     """Ultralytics가 annotations를 labels로 찾을 수 있는 symlink와 YAML을 만든다."""
     labels_path = policy.dataset_dir / "labels"
@@ -834,11 +1263,13 @@ def write_manifest(policy) -> None:
             )
     content = "\n".join(
         [
-            f"schema_version: {8 if depth_visibility else 6}",
+            f"schema_version: {DATASET_SCHEMA_VERSION}",
             "task: img2pos",
             f"version: {policy.dataset_version or 'default'}",
             "sample_unit: synchronized_capture",
             "input: synchronized_rgb_images",
+            "constants: constants.json",
+            "trials: trials.jsonl",
             "samples: samples.jsonl",
             "metadata: metadata.jsonl",
             "image_layout: images/<split>/<camera>/trial_<index>/*.jpg",
@@ -849,6 +1280,22 @@ def write_manifest(policy) -> None:
             "  frame: base_link",
             "  unit: meter",
             "  timestamp: capture_stamp",
+            "poses:",
+            "  convention: parent_T_child",
+            "  representation: translation_m + quaternion_xyzw",
+            "  dataset_constants: constants.json#static_transforms",
+            "  trial_constants: trials.jsonl#poses+transforms",
+            "  sample_dynamic: samples.jsonl#poses",
+            "se3_residuals:",
+            "  field: se3_residuals",
+            "  definition: Log(parent_T_child)",
+            "  reference: identity",
+            "  order: [vx_m, vy_m, vz_m, wx_rad, wy_rad, wz_rad]",
+            f"  reconstruction_tolerance: {POSE_RECONSTRUCTION_ATOL:g}",
+            "normalization:",
+            "  dataset: camera calibration, static tool transforms, connector geometry",
+            "  trial: scenario, port pose, nominal TCP-to-plug grasp",
+            "  sample: images, dynamic poses, learning residuals, constant deltas",
             "split:",
             "  group_by: trial_id",
             f"  validation_ratio: {policy.val_ratio:.6f}",
@@ -874,6 +1321,8 @@ def save_sample(
     step_idx: int,
     observation,
     port_tf: Transform,
+    plug_tip_tf: Transform,
+    plug_reference_tf: Transform,
     timestamps: dict[str, Any],
     label_xyz: list[float],
     sample: dict[str, Any],
@@ -890,6 +1339,22 @@ def save_sample(
         return False, "유효한 camera capture timestamp가 없음"
     if len(label_xyz) != 3 or not all(np.isfinite(float(value)) for value in label_xyz):
         return False, "유효한 XYZ correction label이 없음"
+    try:
+        poses, residuals, reconstruction_error = capture_pose_residual_labels(
+            policy,
+            observation,
+            plug_tip_tf,
+            plug_reference_tf,
+            port_tf,
+        )
+    except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
+        return False, f"pose/residual label 생성 실패: {exc}"
+    if not np.isfinite(reconstruction_error) or reconstruction_error > POSE_RECONSTRUCTION_ATOL:
+        return False, (
+            "pose/residual 역산 검증 실패: "
+            f"max_abs_error={reconstruction_error:.3e}, "
+            f"tolerance={POSE_RECONSTRUCTION_ATOL:.3e}"
+        )
     visibility = {
         camera: _port_projection(policy, observation, camera, port_tf)
         for camera in ("left", "center", "right")
@@ -970,6 +1435,74 @@ def save_sample(
         for path in written:
             path.unlink(missing_ok=True)
         return False, f"세 camera 저장 불완전: details={failures}"
+
+    connector = _connector(task)
+    port_stamp_ns = int(
+        timestamps.get("tf", {}).get("port", {}).get("stamp_ns", 0)
+    )
+    try:
+        actual_connector = se3.matrix_from_residual_record(
+            residuals["plug_tip_T_plug_reference"]
+        )
+        actual_tcp_plug = se3.matrix_from_residual_record(
+            residuals["tcp_T_plug_reference"]
+        )
+        base_port = se3.matrix_from_pose_record(
+            poses["base_T_port_entrance"]
+        )
+        nominal_connector = _ensure_dataset_constants(
+            policy,
+            observation,
+            connector,
+            actual_connector,
+        )
+        (
+            nominal_port,
+            nominal_tcp_plug,
+            port_delta,
+            tcp_plug_delta,
+        ) = _ensure_trial_record(
+            policy,
+            trial_id=trial_id,
+            split=split,
+            task=task,
+            connector=connector,
+            base_port=base_port,
+            tcp_plug_reference=actual_tcp_plug,
+            port_stamp_ns=port_stamp_ns,
+        )
+        _, _, connector_delta = _transform_error(
+            nominal_connector, actual_connector
+        )
+        normalized_residuals = _normalized_sample_residuals(
+            residuals,
+            connector_delta=connector_delta,
+            port_delta=port_delta,
+            tcp_plug_delta=tcp_plug_delta,
+        )
+        normalized_error = _normalized_reconstruction_error(
+            poses=poses,
+            residuals=normalized_residuals,
+            nominal_connector=nominal_connector,
+            nominal_port=nominal_port,
+            nominal_tcp_plug=nominal_tcp_plug,
+        )
+    except (KeyError, TypeError, ValueError, OSError, np.linalg.LinAlgError) as exc:
+        for path in written:
+            path.unlink(missing_ok=True)
+        return False, f"normalized constants/trial 저장 검증 실패: {exc}"
+    reconstruction_error = max(reconstruction_error, normalized_error)
+    if not np.isfinite(reconstruction_error) or reconstruction_error > POSE_RECONSTRUCTION_ATOL:
+        for path in written:
+            path.unlink(missing_ok=True)
+        return False, (
+            "normalized pose/residual 역산 검증 실패: "
+            f"max_abs_error={reconstruction_error:.3e}, "
+            f"tolerance={POSE_RECONSTRUCTION_ATOL:.3e}"
+        )
+
+    dynamic_poses = dict(poses)
+    dynamic_poses.pop("base_T_port_entrance", None)
     planned_tier_mm = (
         float(sample["tier_m"] * 1000.0)
         if sample["tier_m"] is not None
@@ -983,10 +1516,7 @@ def save_sample(
     record = {
         "id": capture_id,
         "trial_id": trial_id,
-        "split": split,
         "images": images,
-        "connector": _connector(task),
-        "collection_policy": policy.collection_policy,
         "target_xyz_m": [float(value) for value in label_xyz],
         "sampling_offset_xyz_m": sample["actual_xyz_m"],
         "sampling_tier_mm": planned_tier_mm,
@@ -995,6 +1525,14 @@ def save_sample(
         "view_distance_m": sample["actual_view_distance_m"],
         "capture_stamp_ns": capture_stamp,
         "max_sync_skew_ns": _max_skew(timestamps),
+        "pose_source_stamps_ns": {
+            "camera_capture": capture_stamp,
+            "controller": int(timestamps.get("controller_stamp_ns", 0)),
+            "plug_tf": int(timestamps.get("tf", {}).get("plug", {}).get("stamp_ns", 0)),
+        },
+        "poses": dynamic_poses,
+        "se3_residuals": normalized_residuals,
+        "pose_reconstruction_max_abs_error": float(reconstruction_error),
         "settle_position_error_mm": float(settle["position_error_m"] * 1000.0),
         "settle_orientation_error_rad": float(settle["orientation_error_rad"]),
         "settle_wait_ms": float(settle["wait_ns"] / 1e6),

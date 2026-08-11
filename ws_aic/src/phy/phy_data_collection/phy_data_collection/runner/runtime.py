@@ -322,6 +322,7 @@ def _policy_environment(
     run_id: str,
     trial_index: int | None = None,
     trial_split: str = "",
+    trial_metadata: dict | None = None,
 ) -> dict[str, str]:
     """PortOffsetCollect가 사용할 ROS 2 및 데이터 수집 환경변수를 구성한다."""
     env = os.environ.copy()
@@ -337,6 +338,13 @@ def _policy_environment(
         env["AIC_COLLECT_RANDOM_SEED"] = str(args.seed + trial_index * 1_000_003)
     if trial_split:
         env["AIC_IMG2POS_TRIAL_SPLIT"] = trial_split
+    if trial_metadata is not None:
+        env["AIC_IMG2POS_TRIAL_METADATA_JSON"] = json.dumps(
+            trial_metadata,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     env["AIC_COLLECT_STEPS"] = str(args.samples_per_trial)
     env["AIC_IMG2POS_COLLECTION_POLICY"] = args.collection_policy
     env["AIC_IMG2POS_DATASET_VERSION"] = args.dataset_version.strip()
@@ -413,6 +421,7 @@ def start_policy(
     run_id: str,
     trial_index: int | None = None,
     trial_split: str = "",
+    trial_metadata: dict | None = None,
     line_callback: Callable[[str], None] | None = None,
 ) -> subprocess.Popen:
     """PortOffsetCollect ROS 2 node를 독립 session/PGID로 실행한다."""
@@ -422,6 +431,7 @@ def start_policy(
         run_id=run_id,
         trial_index=trial_index,
         trial_split=trial_split,
+        trial_metadata=trial_metadata,
     )
     try:
         stop_file.unlink()

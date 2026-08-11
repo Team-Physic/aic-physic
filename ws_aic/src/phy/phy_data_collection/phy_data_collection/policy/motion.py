@@ -1070,10 +1070,10 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 )
                 policy.sleep_for(policy.step_sleep_s)
                 continue
-            label_xyz = dataset.target_xyz(
-                port_tf,
-                dataset.shift_origin(plug_stamped.transform, context["plug_offset"]),
+            plug_reference_tf = dataset.shift_origin(
+                plug_stamped.transform, context["plug_offset"]
             )
+            label_xyz = dataset.target_xyz(port_tf, plug_reference_tf)
             sampling_offset_xyz = _actual_sampling_offset(
                 label_xyz,
                 port_tf,
@@ -1113,6 +1113,8 @@ def collect(policy, context, get_observation, move_robot) -> bool:
                 step_idx=context["counts"]["collect"],
                 observation=observation,
                 port_tf=port_tf,
+                plug_tip_tf=plug_stamped.transform,
+                plug_reference_tf=plug_reference_tf,
                 timestamps=timestamps,
                 label_xyz=label_xyz,
                 sample=sample,

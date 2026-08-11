@@ -341,6 +341,8 @@ trial이 정상 종료됩니다.
 ```text
 ws_aic/data/img2pos/<version>/
 ├── data.yaml
+├── constants.json
+├── trials.jsonl
 ├── metadata.jsonl
 ├── samples.jsonl
 ├── yolo_pose.yaml                  # auto annotation 활성화 시 생성
@@ -387,22 +389,42 @@ keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(
 이 기능 적용 후에는 새 `--dataset-version`을 사용하는 것을 권장합니다. 기존 RGB
 데이터를 유지해야 하면 annotation editor의 후처리 결과를 별도로 검증한 뒤 저장합니다.
 
-`metadata.jsonl`은 수집 실행마다 한 row를 추가합니다.
+schema 10부터 반복 범위에 따라 pose와 calibration을 세 파일로 나눕니다.
+
+- `constants.json`: dataset 전체의 camera intrinsic, `tool0_T_tcp`, camera optical
+  extrinsic, connector별 `plug_tip_T_plug_reference`, SE(3) 표현 순서와 검증 허용치
+- `trials.jsonl`: randomized scenario·조명, split, connector, 고정 port pose,
+  trial별 nominal `tcp_T_plug_reference`
+- `samples.jsonl`: 이미지, capture timestamp, 동적 TCP/camera/plug pose, 학습용
+  camera/plug/port residual과 상수의 미세 delta
+
+`metadata.jsonl`은 수집 실행마다 한 row를 추가하는 run provenance입니다.
 
 | 필드 | 의미 |
 | --- | --- |
 | `seed` | 실행 시작 시 자동 생성된 master seed |
 | `trials` | 실행한 전체 trial 수 |
 
-`samples.jsonl`의 한 row는 동일한 `capture_stamp_ns`를 공유하는 동기화 capture 하나에 대응합니다.
+`trials.jsonl`의 한 row는 한 randomized trial에 대응합니다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `trial_id`, `run_id`, `trial_index`, `task_id` | sample join과 실행 추적용 식별자 |
+| `split`, `connector`, `collection_policy` | trial 전체가 공유하는 분할·connector·수집 구간 |
+| `scenario` | board, card/rail/port, cable grasp RPY, robot home, 조명과 seed |
+| `poses.base_T_port_entrance` | 움직이지 않는 trial별 port entrance pose |
+| `transforms.tcp_T_plug_reference_nominal` | trial 첫 승인 capture의 grasp 기준 변환 |
+| `pose_source_stamps_ns.port_tf` | 고정 port snapshot의 원본 ROS 시각 |
+
+`samples.jsonl`의 한 row는 동일한 `capture_stamp_ns`를 공유하는 동기화 capture
+하나에 대응하며 `trial_id`로 `trials.jsonl`을 참조합니다.
 
 | 필드 | 의미 |
 | --- | --- |
 | `id` | 동기화 capture 식별자 |
-| `trial_id`, `split` | trial 식별자와 trial 단위 train/val/test 분할 |
-| `images`, `connector` | 항상 `left`, `center`, `right`를 모두 갖는 JPEG 상대 경로 mapping과 connector 구분 |
+| `trial_id` | `trials.jsonl` 외래키; split·connector·policy는 trial row에서 조회 |
+| `images` | 항상 `left`, `center`, `right`를 모두 갖는 JPEG 상대 경로 mapping |
 | `annotations`, `annotation_labels` | camera별 YOLO-pose TXT 상대 경로와 `SFP_<rail><port>` label 목록 |
-| `collection_policy` | `board-view`, `descent`, `near-port` 수집 구간 |
 | `target_xyz_m` | 공통 촬영 시점 `base_link`의 `port_entrance - plug_reference` correction |
 | `sampling_offset_xyz_m` | 명령 기준 거리를 제외한 실제 port-local XYZ; tier 분포 감사용 |
 | `sampling_tier_mm` | 호환성을 위해 유지하는 계획 sampling tier; 다른 정책은 `null` |
@@ -411,12 +433,19 @@ keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(
 | `view_distance_m` | 촬영 시점 plug와 port 사이 접근축 거리 |
 | `capture_stamp_ns` | 묶인 camera images의 공통 촬영 ROS 시각 |
 | `max_sync_skew_ns` | 승인 source들의 최대 시각 차이 |
+| `pose_source_stamps_ns` | camera capture, controller, plug TF의 원본 시각; port 시각은 trial row에 저장 |
+| `poses` | 촬영 시점 동적 `base_T_tcp`, camera 3대, plug tip/reference pose |
+| `se3_residuals` | camera·plug·port 학습 label과 dataset/trial 상수의 미세 delta; 각 transform은 `se3_log_vw`만 저장 |
+| `pose_reconstruction_max_abs_error` | 세 JSON 파일을 join한 `Exp(Log(T))`와 전역 pose 재합성의 최대 행렬 원소 오차 |
 | `settle_*` | 촬영 전 연속 controller frame 간 최종 TCP 이동량과 대기시간 |
 | `haptic_baseline_force_n`, `haptic_peak_delta_force_n` | 이동 직전 정적 하중과 승인 전 최대 보정 force |
 
 같은 trial의 모든 capture는 같은 split에 배정됩니다. 기본 34 trial은 정확히
-24 train, 5 validation, 5 test로 배정됩니다. command pose, RPY,
-scenario, projection, 전체 TF는 img2pos 입력·정답이 아니므로 dataset에 중복 저장하지
+24 train, 5 validation, 5 test로 배정됩니다. `se3_residuals`는 아직 connector별 nominal
+grasp를 빼지 않은 identity-reference logarithm입니다. trial nominal과 connector
+geometry로 옮긴 변환의 실제 미세 차이는 `constant_deltas`와 `trial_deltas`로 보존하므로
+세 파일을 join하면 원래 pose를 손실 없이 복원할 수 있습니다. pose/residual 역산
+오차가 `1e-9`를 넘거나 고정 변환 drift가 manifest 허용치를 넘는 capture는 저장하지
 않습니다.
 
 수집 완료 시 `collection_summary.json`에 capture/trial 수, split 누수, connector·tier

@@ -220,7 +220,7 @@ def _prepare_trial(
     ctx: RunContext,
     index: int,
     rng: random.Random,
-) -> tuple[str, Path, Path | None, dict]:
+) -> tuple[str, Path, Path | None, dict, dict]:
     """시나리오와 world를 랜덤화하고 trial 입력 파일을 기록한다."""
     config_path, requested_world_path = _trial_paths(ctx, index)
     config, scenario_params = make_trial_config(index, rng, ctx.args)
@@ -232,6 +232,9 @@ def _prepare_trial(
         requested_world_path,
     )
     scenario_params[task_id]["lighting"] = lighting
+    scenario_params[task_id]["task_id"] = task_id
+    scenario_params[task_id]["master_seed"] = ctx.args.seed
+    scenario_params[task_id]["trial_seed"] = ctx.args.seed + index * 1_000_003
     write_inputs(config, config_path)
     log_trial_randomization(
         index=index,
@@ -241,7 +244,13 @@ def _prepare_trial(
         lighting=lighting,
         args=ctx.args,
     )
-    return task_id, config_path, world_path, lighting
+    return (
+        task_id,
+        config_path,
+        world_path,
+        lighting,
+        scenario_params[task_id],
+    )
 
 
 def _print_dry_run(
@@ -258,7 +267,9 @@ def _print_dry_run(
 
 def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
     """하나의 trial을 실행하고 소유한 policy, rosbag, simulator를 검증한다."""
-    task_id, config_path, world_path, lighting = _prepare_trial(ctx, index, rng)
+    task_id, config_path, world_path, lighting, trial_metadata = _prepare_trial(
+        ctx, index, rng
+    )
     if ctx.args.dry_run:
         _print_dry_run(config_path, world_path, lighting)
         return
@@ -339,6 +350,7 @@ def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
             run_id=ctx.run_id,
             trial_index=index,
             trial_split=_trial_split(ctx.args, index),
+            trial_metadata=trial_metadata,
             line_callback=line_callback,
         )
         policy_group = register_owned_group(
