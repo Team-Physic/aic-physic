@@ -94,8 +94,8 @@
             <camera_info_topic>/${name}/camera_info</camera_info_topic>
             <optical_frame_id>${tf_prefix}optical</optical_frame_id>
             <image>
-              <width>1152</width>
-              <height>1024</height>
+              <width>864</width>
+              <height>768</height>
               <format>R8G8B8</format>
             </image>
             <horizontal_fov>0.8718</horizontal_fov>
