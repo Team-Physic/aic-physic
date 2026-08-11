@@ -169,7 +169,6 @@ BASE_ROBOT_HOME = {
 
 LIMITS = {
     "nic_translation": (-0.0215, 0.0234),
-    "nic_yaw": (-0.17453292519943295, 0.17453292519943295),
     "sc_translation": (-0.06, 0.055),
     "sfp_board_x": (0.13, 0.17),
     "sfp_board_y": (-0.25, -0.20),

@@ -161,6 +161,8 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 추출합니다. `--port-type sc`면 3개 non-empty 2-bit 조합에서 하나를 uniform 추출합니다.
 bit의 오른쪽부터 rail 0, 1, ...에 대응하며 `0`은 card 없음, `1`은 card 생성을 뜻합니다.
 target rail도 추출된 조합의 활성 rail 중에서 uniform 선택합니다.
+각 NIC card의 rail 방향 translation은 공식 rail 한계인 `-21.5~+23.4mm`에서
+무작위화하지만 rail-relative roll, pitch, yaw는 모두 `0`으로 고정합니다.
 
 ```text
 SFP: Uniform({00001, 00010, ..., 11111})
