@@ -1,4 +1,4 @@
-"""Workspace path discovery shared by installed data-collection commands."""
+"""Workspace path discovery shared by data-collection runner modules."""
 
 from __future__ import annotations
 

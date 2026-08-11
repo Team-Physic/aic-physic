@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 from geometry_msgs.msg import Transform
 
-from phy_policy.data_generator.geometry import pose_matrix, quaternion_matrix
+from .geometry import pose_matrix, quaternion_matrix
 
 
 SFP_REFERENCE_OFFSET = np.array([0.0, 0.0021125, 0.0], dtype=float)
@@ -26,6 +26,38 @@ ROBOT_ARM_OCCLUSION_REASON = "robot_arm_occlusion"
 ROBOT_ARM_DARK_THRESHOLD = 40
 ROBOT_ARM_MIN_AREA_RATIO = 0.01
 ROBOT_ARM_MASK_DILATION_PX = 8
+ANNOTATION_DEPTH_MARGIN_M = 0.002
+ANNOTATION_DEPTH_PATCH_RADIUS_PX = 2
+ANNOTATION_MIN_VISIBLE_KEYPOINTS = 2
+ANNOTATION_DEPTH_IMAGE_SIZE_PX = (576, 512)
+ANNOTATION_DEPTH_UPDATE_RATE_HZ = 5.0
+SFP_RAIL_COUNT = 5
+SFP_PORT_COUNT = 2
+SC_CLASS_ID = SFP_RAIL_COUNT * SFP_PORT_COUNT
+PORT_CLASS_NAMES = {
+    **{
+        rail * SFP_PORT_COUNT + port: f"SFP_{rail}{port}"
+        for rail in range(SFP_RAIL_COUNT)
+        for port in range(SFP_PORT_COUNT)
+    },
+    SC_CLASS_ID: "sc_port",
+}
+PORT_OUTER_SIZE_M = {
+    "sfp": (0.016224, 0.013698),
+    "sc": (0.025781, 0.009300),
+}
+
+
+def port_annotation_class(port_type: str, rail: int, port: int = 0) -> tuple[int, str]:
+    """connector 위치를 YOLO class ID와 사람이 읽는 rail/port label로 변환한다."""
+    if port_type == "sfp":
+        if rail not in range(SFP_RAIL_COUNT) or port not in range(SFP_PORT_COUNT):
+            raise ValueError(f"invalid SFP rail/port: rail={rail}, port={port}")
+        class_id = rail * SFP_PORT_COUNT + port
+        return class_id, PORT_CLASS_NAMES[class_id]
+    if port_type == "sc":
+        return SC_CLASS_ID, PORT_CLASS_NAMES[SC_CLASS_ID]
+    raise ValueError(f"unsupported port type: {port_type}")
 
 
 def is_port_visibility_failure(detail: str) -> bool:
@@ -57,12 +89,32 @@ def image_to_bgr(policy, message, camera: str) -> np.ndarray | None:
     return cv2.cvtColor(image, cv2.COLOR_RGB2BGR) if message.encoding == "rgb8" else image.copy()
 
 
-def _camera_matrix(camera_info) -> np.ndarray | None:
-    """CameraInfo의 intrinsic 행렬을 검증해 반환한다."""
+def _camera_matrix(camera_info, image=None) -> np.ndarray | None:
+    """CameraInfo intrinsic을 검증하고 필요하면 image 해상도로 변환한다."""
     if camera_info is None or len(camera_info.k) < 9:
         return None
     matrix = np.asarray(camera_info.k, dtype=float).reshape(3, 3)
-    return matrix if abs(matrix[0, 0]) >= 1e-9 and abs(matrix[1, 1]) >= 1e-9 else None
+    if abs(matrix[0, 0]) < 1e-9 or abs(matrix[1, 1]) < 1e-9:
+        return None
+    if image is None:
+        return matrix
+
+    source_width = int(getattr(camera_info, "width", 0))
+    source_height = int(getattr(camera_info, "height", 0))
+    target_width = int(getattr(image, "width", 0))
+    target_height = int(getattr(image, "height", 0))
+    if min(source_width, source_height, target_width, target_height) <= 0:
+        return None
+    if source_width * target_height != source_height * target_width:
+        return None
+
+    # Gazebo depth/RGB sensor의 CameraInfo가 같은 topic에 교차로 발행될 수
+    # 있다. 두 센서는 pose/FOV/aspect ratio가 같으므로 depth 보정값이
+    # 들어와도 RGB image 해상도로 intrinsic을 확대하면 같은 ray가 된다.
+    scale = np.diag(
+        [target_width / source_width, target_height / source_height, 1.0]
+    )
+    return scale @ matrix
 
 
 def _base_to_camera(policy, observation, camera: str) -> np.ndarray:
@@ -80,7 +132,8 @@ def _points_projection(
 ) -> dict[str, Any]:
     """모든 base_link 점이 지정 camera의 유효 영상 영역에 보이는지 검사한다."""
     message = image_for_camera(observation, camera)
-    intrinsic = _camera_matrix(camera_info_for(observation, camera))
+    camera_info = camera_info_for(observation, camera)
+    intrinsic = _camera_matrix(camera_info, message)
     if message is None or message.width == 0 or message.height == 0 or intrinsic is None:
         return {"visible": False, "reason": "missing_image_or_intrinsics"}
     try:
@@ -156,6 +209,221 @@ def _port_projection(policy, observation, camera: str, port_tf: Transform) -> di
     if mask[v, u]:
         return {**result, "visible": False, "reason": ROBOT_ARM_OCCLUSION_REASON}
     return result
+
+
+def _port_outer_corners_base(port_type: str, port_tf: Transform) -> list[list[float]]:
+    """port entrance 로컬 외곽 4점을 회전을 포함한 base_link 좌표로 변환한다."""
+    width, height = PORT_OUTER_SIZE_M[port_type]
+    rotation = quaternion_matrix(
+        port_tf.rotation.x,
+        port_tf.rotation.y,
+        port_tf.rotation.z,
+        port_tf.rotation.w,
+    )
+    translation = np.array(
+        [port_tf.translation.x, port_tf.translation.y, port_tf.translation.z],
+        dtype=float,
+    )
+    local_corners = (
+        (-width / 2.0, height / 2.0, 0.0),
+        (width / 2.0, height / 2.0, 0.0),
+        (width / 2.0, -height / 2.0, 0.0),
+        (-width / 2.0, -height / 2.0, 0.0),
+    )
+    return [
+        [float(value) for value in translation + rotation @ np.asarray(corner)]
+        for corner in local_corners
+    ]
+
+
+def _port_outer_projection(
+    policy, observation, camera: str, annotation_port: dict[str, Any]
+) -> dict[str, Any]:
+    """port 외곽 4점을 camera image로 투영한다."""
+    return _points_projection(
+        policy,
+        observation,
+        camera,
+        _port_outer_corners_base(
+            annotation_port["port_type"], annotation_port["transform"]
+        ),
+    )
+
+
+def _depth_image_meters(message) -> np.ndarray:
+    """ROS depth Image의 32FC1/16UC1 buffer를 meter 단위 2D 배열로 변환한다."""
+    encoding = str(getattr(message, "encoding", "")).upper()
+    byte_order = ">" if bool(getattr(message, "is_bigendian", False)) else "<"
+    if encoding == "32FC1":
+        dtype = np.dtype(f"{byte_order}f4")
+        scale = 1.0
+    elif encoding in {"16UC1", "MONO16"}:
+        dtype = np.dtype(f"{byte_order}u2")
+        scale = 0.001
+    else:
+        raise ValueError(f"unsupported depth encoding: {encoding or 'empty'}")
+    height = int(message.height)
+    width = int(message.width)
+    step = int(message.step)
+    row_bytes = width * dtype.itemsize
+    if height <= 0 or width <= 0 or step < row_bytes:
+        raise ValueError(
+            f"invalid depth dimensions: width={width}, height={height}, step={step}"
+        )
+    buffer = memoryview(message.data)
+    if buffer.nbytes < step * height:
+        raise ValueError(
+            f"invalid depth buffer size: expected={step * height}, got={buffer.nbytes}"
+        )
+    image = np.ndarray(
+        shape=(height, width),
+        dtype=dtype,
+        buffer=buffer,
+        strides=(step, dtype.itemsize),
+    )
+    return image.astype(np.float32, copy=True) * scale
+
+
+def _depth_for_capture(policy, observation, camera: str) -> np.ndarray:
+    """RGB 촬영 stamp와 허용 오차 안에서 가장 가까운 depth frame을 반환한다."""
+    capture_stamp = _stamp_ns(image_for_camera(observation, camera).header.stamp)
+    provider = getattr(policy, "depth_image_at", None)
+    if capture_stamp is None or not callable(provider):
+        raise ValueError(f"{camera}: synchronized depth provider unavailable")
+    message = provider(camera, capture_stamp)
+    depth_stamp = _stamp_ns(getattr(getattr(message, "header", None), "stamp", None))
+    max_skew_ns = int(getattr(policy, "annotation_depth_max_skew_ns", 0))
+    if (
+        message is None
+        or depth_stamp is None
+        or abs(depth_stamp - capture_stamp) > max_skew_ns
+    ):
+        raise ValueError(
+            f"{camera}: depth frame missing within {max_skew_ns}ns of "
+            f"RGB stamp {capture_stamp}"
+        )
+    depth = _depth_image_meters(message)
+    rgb = image_for_camera(observation, camera)
+    if depth.shape[0] * int(rgb.width) != depth.shape[1] * int(rgb.height):
+        raise ValueError(
+            f"{camera}: depth/RGB aspect ratio mismatch: depth={depth.shape}, "
+            f"rgb={(int(rgb.height), int(rgb.width))}"
+        )
+    return depth
+
+
+def _keypoint_visibilities(
+    projection: dict[str, Any],
+    depth: np.ndarray,
+) -> tuple[int, ...]:
+    """투영 깊이보다 앞선 surface가 있는 keypoint를 가림(1)으로 판정한다."""
+    height, width = depth.shape
+    rgb_width, rgb_height = projection["image_size_px"]
+    scale_x = width / float(rgb_width)
+    scale_y = height / float(rgb_height)
+    visibilities = []
+    radius = max(
+        1,
+        round(ANNOTATION_DEPTH_PATCH_RADIUS_PX * min(scale_x, scale_y)),
+    )
+    for point in projection["points"]:
+        u = int(
+            np.clip(
+                round((float(point["u_px"]) + 0.5) * scale_x - 0.5),
+                0,
+                width - 1,
+            )
+        )
+        v = int(
+            np.clip(
+                round((float(point["v_px"]) + 0.5) * scale_y - 0.5),
+                0,
+                height - 1,
+            )
+        )
+        patch = depth[
+            max(0, v - radius) : min(height, v + radius + 1),
+            max(0, u - radius) : min(width, u + radius + 1),
+        ]
+        valid = patch[np.isfinite(patch) & (patch > 0.0)]
+        if valid.size == 0:
+            visibilities.append(2)
+            continue
+        observed_depth = float(np.median(valid))
+        expected_depth = float(point["depth_m"])
+        occluded = observed_depth + ANNOTATION_DEPTH_MARGIN_M < expected_depth
+        visibilities.append(1 if occluded else 2)
+    return tuple(visibilities)
+
+
+def _yolo_pose_row(
+    class_id: int,
+    projection: dict[str, Any],
+    visibilities: tuple[int, ...] | None = None,
+) -> str:
+    """외곽 투영점에서 정규화 bbox와 4-keypoint YOLO pose row를 만든다."""
+    width, height = projection["image_size_px"]
+    points = projection["points"]
+    xs = [float(point["u_px"]) / width for point in points]
+    ys = [float(point["v_px"]) / height for point in points]
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    bbox = [
+        (x_min + x_max) / 2.0,
+        (y_min + y_max) / 2.0,
+        x_max - x_min,
+        y_max - y_min,
+    ]
+    values = [f"{value:.9f}" for value in bbox]
+    if visibilities is None:
+        visibilities = (2,) * len(points)
+    if len(visibilities) != len(points):
+        raise ValueError(
+            f"visibility count mismatch: points={len(points)}, "
+            f"visibilities={len(visibilities)}"
+        )
+    for x, y, visibility in zip(xs, ys, visibilities):
+        values.extend((f"{x:.9f}", f"{y:.9f}", str(int(visibility))))
+    return " ".join([str(int(class_id)), *values])
+
+
+def _annotation_relative_path(image_relative_path: Path) -> Path:
+    """images 상대 경로에 대응하는 annotations TXT 상대 경로를 반환한다."""
+    return Path("annotations", *image_relative_path.parts[1:]).with_suffix(".txt")
+
+
+def _annotation_rows_by_camera(
+    policy,
+    observation,
+    annotation_ports: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """camera별로 화면 안에 완전히 투영된 모든 port의 YOLO pose row를 만든다."""
+    rows = {camera: [] for camera in ("left", "center", "right")}
+    labels = {camera: [] for camera in rows}
+    for camera in rows:
+        depth_visibility = bool(
+            getattr(policy, "auto_annotation_visibility", False)
+        )
+        depth = (
+            _depth_for_capture(policy, observation, camera)
+            if depth_visibility
+            else None
+        )
+        for port in annotation_ports:
+            projection = _port_outer_projection(policy, observation, camera, port)
+            if projection.get("visible", False):
+                visibilities = (
+                    _keypoint_visibilities(projection, depth)
+                    if depth is not None
+                    else (2,) * len(projection["points"])
+                )
+                if visibilities.count(2) < ANNOTATION_MIN_VISIBLE_KEYPOINTS:
+                    continue
+                rows[camera].append(
+                    _yolo_pose_row(port["class_id"], projection, visibilities)
+                )
+                labels[camera].append(port["label"])
+    return rows, labels
 
 
 def _stamp_ns(stamp) -> int | None:
@@ -461,6 +729,37 @@ def _dataset_write_lock(policy):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+def _write_yolo_pose_config(policy) -> None:
+    """Ultralytics가 annotations를 labels로 찾을 수 있는 symlink와 YAML을 만든다."""
+    labels_path = policy.dataset_dir / "labels"
+    if labels_path.is_symlink():
+        if os.readlink(labels_path) != "annotations":
+            raise OSError(f"unexpected labels symlink: {labels_path}")
+    elif labels_path.exists():
+        raise OSError(f"labels path already exists and is not a symlink: {labels_path}")
+    else:
+        try:
+            labels_path.symlink_to("annotations", target_is_directory=True)
+        except FileExistsError:
+            if not labels_path.is_symlink() or os.readlink(labels_path) != "annotations":
+                raise
+    content = "\n".join(
+        [
+            "train: images/train",
+            "val: images/val",
+            "test: images/test",
+            "names:",
+            *(f"  {class_id}: {name}" for class_id, name in PORT_CLASS_NAMES.items()),
+            "kpt_shape: [4, 3]",
+            "flip_idx: [0, 1, 2, 3]",
+            "",
+        ]
+    )
+    temporary = policy.dataset_dir / f".yolo_pose.yaml.{os.getpid()}.tmp"
+    temporary.write_text(content, encoding="utf-8")
+    temporary.replace(policy.dataset_dir / "yolo_pose.yaml")
+
+
 def write_manifest(policy) -> None:
     """compact img2pos 데이터셋 schema를 data.yaml에 기록한다."""
     policy.dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -495,9 +794,47 @@ def write_manifest(policy) -> None:
             + ", ".join(f"{value * 1000.0:g}" for value in policy.sampling_tiers_m)
             + "]"
         )
+    if policy.collection_policy in {"descent", "near-port"}:
+        sampling.extend(
+            [
+                f"  haptic_guard: {str(policy.haptic_guard_enabled).lower()}",
+                f"  haptic_force_threshold_n: {policy.haptic_force_threshold_n:g}",
+                f"  haptic_contact_duration_s: {policy.haptic_contact_duration_s:g}",
+                f"  haptic_baseline_samples: {policy.haptic_baseline_samples}",
+            ]
+        )
+    auto_annotate_ports = bool(getattr(policy, "auto_annotate_ports", False))
+    depth_visibility = bool(
+        getattr(policy, "auto_annotation_visibility", False)
+    )
+    annotations = ["annotations:", f"  enabled: {str(auto_annotate_ports).lower()}"]
+    if auto_annotate_ports:
+        annotations.extend(
+            [
+                "  format: yolo_pose",
+                "  layout: annotations/<split>/<camera>/trial_<index>/*.txt",
+                "  class_names: yolo_pose.yaml#names",
+                "  keypoint_order: [x_min_y_max, x_max_y_max, x_max_y_min, x_min_y_min]",
+                "  keypoint_shape: [4, 3]",
+                "  port_outer_size_mm: {sfp: [16.224, 13.698], sc: [25.781, 9.300]}",
+            ]
+        )
+        if depth_visibility:
+            annotations.extend(
+                [
+                    "  visibility_source: synchronized_depth",
+                    "  depth_image_size_px: "
+                    f"[{ANNOTATION_DEPTH_IMAGE_SIZE_PX[0]}, {ANNOTATION_DEPTH_IMAGE_SIZE_PX[1]}]",
+                    f"  depth_update_rate_hz: {ANNOTATION_DEPTH_UPDATE_RATE_HZ:g}",
+                    "  max_depth_rgb_skew_ms: "
+                    f"{policy.annotation_depth_max_skew_ns / 1e6:g}",
+                    f"  minimum_visible_keypoints: {ANNOTATION_MIN_VISIBLE_KEYPOINTS}",
+                    f"  occlusion_margin_m: {ANNOTATION_DEPTH_MARGIN_M:g}",
+                ]
+            )
     content = "\n".join(
         [
-            "schema_version: 5",
+            f"schema_version: {8 if depth_visibility else 6}",
             "task: img2pos",
             f"version: {policy.dataset_version or 'default'}",
             "sample_unit: synchronized_capture",
@@ -516,6 +853,7 @@ def write_manifest(policy) -> None:
             "  group_by: trial_id",
             f"  validation_ratio: {policy.val_ratio:.6f}",
             f"  test_ratio: {policy.test_ratio:.6f}",
+            *annotations,
             *sampling,
             "",
         ]
@@ -524,6 +862,8 @@ def write_manifest(policy) -> None:
         temporary = policy.dataset_dir / f".data.yaml.{os.getpid()}.tmp"
         temporary.write_text(content, encoding="utf-8")
         temporary.replace(policy.dataset_dir / "data.yaml")
+        if auto_annotate_ports:
+            _write_yolo_pose_config(policy)
 
 
 def save_sample(
@@ -538,6 +878,7 @@ def save_sample(
     label_xyz: list[float],
     sample: dict[str, Any],
     settle: dict[str, float],
+    annotation_ports: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
 ) -> tuple[bool, str]:
     """port 가시성 승인 후 동일 촬영시각의 세 camera와 공통 label을 저장한다."""
     if observation is None:
@@ -572,10 +913,28 @@ def save_sample(
             f"required={required_cameras}, cameras={detail}"
         )
 
+    auto_annotate_ports = bool(getattr(policy, "auto_annotate_ports", False))
+    if auto_annotate_ports and not annotation_ports:
+        return False, "자동 annotation 대상 port가 없음"
+    annotation_rows: dict[str, list[str]] = {}
+    annotation_labels: dict[str, list[str]] = {}
+    annotation_counts: dict[str, int] = {}
+    if auto_annotate_ports:
+        try:
+            annotation_rows, annotation_labels = _annotation_rows_by_camera(
+                policy, observation, annotation_ports
+            )
+            annotation_counts = {
+                camera: len(labels) for camera, labels in annotation_labels.items()
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            return False, f"port annotation 생성 실패: {exc}"
+
     trial_id = _trial_id(policy, episode_name)
     split = split_for_trial(policy, trial_id)
     capture_id = _compact_capture_id(policy, episode_name, task, step_idx)
     images: dict[str, str] = {}
+    annotations: dict[str, str] = {}
     written: list[Path] = []
     failures: list[str] = []
     for camera in visibility:
@@ -591,11 +950,36 @@ def save_sample(
             failures.append(f"{camera}: JPEG 저장 실패 ({path})")
             continue
         written.append(path)
+        if auto_annotate_ports:
+            relative_annotation = _annotation_relative_path(relative_path)
+            annotation_path = policy.dataset_dir / relative_annotation
+            annotation_path.parent.mkdir(parents=True, exist_ok=True)
+            rows = annotation_rows[camera]
+            try:
+                annotation_path.write_text(
+                    "\n".join(rows) + ("\n" if rows else ""), encoding="utf-8"
+                )
+            except OSError as exc:
+                annotation_path.unlink(missing_ok=True)
+                failures.append(f"{camera}: annotation 저장 실패 ({exc})")
+                continue
+            written.append(annotation_path)
+            annotations[camera] = str(relative_annotation)
         images[camera] = str(relative_path)
     if len(images) != len(visibility):
         for path in written:
             path.unlink(missing_ok=True)
         return False, f"세 camera 저장 불완전: details={failures}"
+    planned_tier_mm = (
+        float(sample["tier_m"] * 1000.0)
+        if sample["tier_m"] is not None
+        else None
+    )
+    actual_tier_mm = (
+        float(sample["actual_tier_m"] * 1000.0)
+        if sample.get("actual_tier_m") is not None
+        else None
+    )
     record = {
         "id": capture_id,
         "trial_id": trial_id,
@@ -605,11 +989,9 @@ def save_sample(
         "collection_policy": policy.collection_policy,
         "target_xyz_m": [float(value) for value in label_xyz],
         "sampling_offset_xyz_m": sample["actual_xyz_m"],
-        "sampling_tier_mm": (
-            float(sample["tier_m"] * 1000.0)
-            if sample["tier_m"] is not None
-            else None
-        ),
+        "sampling_tier_mm": planned_tier_mm,
+        "planned_sampling_tier_mm": planned_tier_mm,
+        "actual_sampling_tier_mm": actual_tier_mm,
         "view_distance_m": sample["actual_view_distance_m"],
         "capture_stamp_ns": capture_stamp,
         "max_sync_skew_ns": _max_skew(timestamps),
@@ -617,6 +999,17 @@ def save_sample(
         "settle_orientation_error_rad": float(settle["orientation_error_rad"]),
         "settle_wait_ms": float(settle["wait_ns"] / 1e6),
     }
+    haptic = sample.get("haptic")
+    if haptic is not None:
+        record["haptic_baseline_force_n"] = float(haptic["baseline_force_n"])
+        record["haptic_peak_delta_force_n"] = float(
+            haptic["peak_delta_force_n"]
+        )
+    if auto_annotate_ports:
+        record["annotations"] = annotations
+        record["annotation_format"] = "yolo_pose"
+        record["annotation_object_counts"] = annotation_counts
+        record["annotation_labels"] = annotation_labels
     try:
         with _dataset_write_lock(policy):
             with policy.samples_path.open("a", encoding="utf-8") as stream:
@@ -633,5 +1026,6 @@ def save_sample(
     )
     return True, (
         f"capture_id={capture_id}, cameras={sorted(images)}, visible={visible}"
-        f"{occlusion}, saved_count={policy.capture_count}"
+        f"{occlusion}, annotations={annotation_counts or 'disabled'}, "
+        f"saved_count={policy.capture_count}"
     )

@@ -19,7 +19,9 @@ import yaml
 
 from .constants import (
     ANSI_COLORS,
-    POLICY_PACKAGE_ROOT,
+    ANNOTATION_ROBOT_DESCRIPTION_PATH,
+    BASE_ROS_GZ_BRIDGE_CONFIG_PATH,
+    PACKAGE_ROOT,
     DATASET_ROOT,
     EPISODE_TRACKING_DIR,
     PIXI_WS,
@@ -33,6 +35,7 @@ from .lifecycle import (
     wait_group_exit,
 )
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+DEPTH_CAMERAS = ("left", "center", "right")
 
 
 @dataclass
@@ -322,7 +325,7 @@ def _policy_environment(
 ) -> dict[str, str]:
     """PortOffsetCollect가 사용할 ROS 2 및 데이터 수집 환경변수를 구성한다."""
     env = os.environ.copy()
-    python_paths = [str(POLICY_PACKAGE_ROOT)]
+    python_paths = [str(PACKAGE_ROOT)]
     if env.get("PYTHONPATH"):
         python_paths.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(python_paths)
@@ -340,6 +343,12 @@ def _policy_environment(
     env["AIC_IMG2POS_DATASET_DIR"] = str(dataset_dir(args))
     env["AIC_IMG2POS_VAL_RATIO"] = str(args.val_ratio)
     env["AIC_IMG2POS_TEST_RATIO"] = str(args.test_ratio)
+    env["AIC_IMG2POS_AUTO_ANNOTATE_PORTS"] = (
+        "true" if args.auto_annotate_ports else "false"
+    )
+    env["AIC_IMG2POS_DEPTH_VISIBILITY"] = (
+        "true" if args.auto_annotate_ports else "false"
+    )
 
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MIN_MM", args.dx_min_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MAX_MM", args.dx_max_mm)
@@ -382,6 +391,13 @@ def _policy_environment(
     )
     env["AIC_COLLECT_SETTLE_POLL_SEC"] = str(args.settle_poll_s)
     env["AIC_COLLECT_MAX_ATTEMPTS"] = str(args.max_attempts)
+    env["AIC_COLLECT_HAPTIC_GUARD"] = "true" if args.haptic_guard else "false"
+    env["AIC_COLLECT_HAPTIC_FORCE_THRESHOLD_N"] = str(
+        args.haptic_force_threshold_n
+    )
+    env["AIC_COLLECT_HAPTIC_CONTACT_DURATION_S"] = str(
+        args.haptic_contact_duration_s
+    )
     env["AIC_COLLECT_COLOR_LOG"] = "true" if args.color_log else "false"
     env["RMW_IMPLEMENTATION"] = env.get("RMW_IMPLEMENTATION", "rmw_zenoh_cpp")
     _apply_worker_isolation(env, args)
@@ -397,6 +413,7 @@ def start_policy(
     run_id: str,
     trial_index: int | None = None,
     trial_split: str = "",
+    line_callback: Callable[[str], None] | None = None,
 ) -> subprocess.Popen:
     """PortOffsetCollect ROS 2 node를 독립 session/PGID로 실행한다."""
     env = _policy_environment(
@@ -422,7 +439,12 @@ def start_policy(
         f"policy:={args.policy}",
     ]
     print("[policy] " + shlex.join(cmd))
-    return _start_logged_process(cmd, cwd=PIXI_WS, env=env)
+    return _start_logged_process(
+        cmd,
+        cwd=PIXI_WS,
+        env=env,
+        line_callback=line_callback,
+    )
 
 
 def stop_policy(
@@ -470,6 +492,14 @@ def start_gazebo(
         launch_args.append("gazebo_gui:=false")
     if args.headless or not args.launch_rviz:
         launch_args.append("launch_rviz:=false")
+    if args.auto_annotate_ports:
+        bridge_config = _write_annotation_bridge_config(config_path)
+        launch_args.extend(
+            [
+                f"description_file:={ANNOTATION_ROBOT_DESCRIPTION_PATH}",
+                f"ros_gz_bridge_config_file:={bridge_config}",
+            ]
+        )
 
     launch_cmd = shlex.join(
         ["ros2", "launch", "aic_bringup", "aic_gz_bringup.launch.py", *launch_args]
@@ -508,6 +538,42 @@ def start_gazebo(
     cmd = ["distrobox", "enter", args.distrobox, "--", "bash", "-lc", inner]
     print("[gazebo] " + shlex.join(cmd))
     return _start_logged_process(cmd, cwd=PIXI_WS)
+
+
+def _write_annotation_bridge_config(config_path: Path) -> Path:
+    """기존 bridge 설정에 수집용 depth image 세 topic을 추가한다."""
+    entries = yaml.safe_load(
+        BASE_ROS_GZ_BRIDGE_CONFIG_PATH.read_text(encoding="utf-8")
+    )
+    if not isinstance(entries, list):
+        raise ValueError(
+            f"invalid ROS-Gazebo bridge config: {BASE_ROS_GZ_BRIDGE_CONFIG_PATH}"
+        )
+    existing = {
+        str(entry.get("ros_topic_name", entry.get("topic_name", "")))
+        for entry in entries
+        if isinstance(entry, dict)
+    }
+    for camera in DEPTH_CAMERAS:
+        topic = f"/{camera}_camera/depth_image"
+        if topic in existing:
+            continue
+        entries.append(
+            {
+                "ros_topic_name": topic,
+                "gz_topic_name": topic,
+                "ros_type_name": "sensor_msgs/msg/Image",
+                "gz_type_name": "gz.msgs.Image",
+                "direction": "GZ_TO_ROS",
+                "lazy": True,
+            }
+        )
+    output_path = config_path.with_name(f"{config_path.stem}_bridge.yaml")
+    output_path.write_text(
+        yaml.safe_dump(entries, sort_keys=False),
+        encoding="utf-8",
+    )
+    return output_path
 
 
 def _project_hf_token() -> str | None:

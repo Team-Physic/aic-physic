@@ -367,7 +367,7 @@ def _make_sfp_trial(
     nic_poses = {
         rail: (
             rng.uniform(*LIMITS["nic_translation"]),
-            rng.uniform(*LIMITS["nic_yaw"]),
+            0.0,
         )
         for rail in active_rails
     }

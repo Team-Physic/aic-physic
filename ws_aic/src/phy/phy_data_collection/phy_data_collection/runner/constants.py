@@ -4,27 +4,29 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phy_data_collection.paths import PROJECT_ROOT
+from .paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 WS_SRC = ROOT / "ws_aic" / "src"
 PIXI_WS = WS_SRC
-POLICY_PACKAGE_ROOT = WS_SRC / "phy" / "phy_policy"
+PACKAGE_ROOT = WS_SRC / "phy" / "phy_data_collection"
 DATASET_ROOT = ROOT / "ws_aic" / "data" / "img2pos"
+COLLECTION_LOG_ROOT = ROOT / "ws_aic" / "logs" / "data_collection"
 ROSBAG_ROOT = ROOT / "rosbags" / "portoffset"
 CONFIG_DIR = Path("/tmp/phy_portoffset_randomization")
 WORLD_TEMPLATE_PATH = (
     ROOT / "ws_aic" / "src" / "aic" / "aic_description" / "world" / "aic.sdf"
 )
+ANNOTATION_ROBOT_DESCRIPTION_PATH = (
+    WS_SRC / "phy" / "phy_data_collection" / "config" / "ur_gz_depth.urdf.xacro"
+)
+BASE_ROS_GZ_BRIDGE_CONFIG_PATH = (
+    WS_SRC / "aic" / "aic_bringup" / "config" / "ros_gz_bridge_config.yaml"
+)
 EPISODE_TRACKING_DIR = Path("/tmp/aic_episodes")
 
-COLLECTION_POLICY_MODULES = {
-    "board-view": "phy_policy.ros.BoardViewCollect",
-    "descent": "phy_policy.ros.DescentCollect",
-    "near-port": "phy_policy.ros.NearPortCollect",
-}
-COLLECTION_POLICY_CHOICES = tuple(COLLECTION_POLICY_MODULES)
-POLICY_MODULE = COLLECTION_POLICY_MODULES["near-port"]
+COLLECTION_POLICY_CHOICES = ("board-view", "descent", "near-port")
+POLICY_MODULE = "phy_data_collection.policy.PortOffsetCollect"
 ENGINE_SETUP = "/ws_aic/install/setup.bash"
 RUN_MARKER_ENV = "AIC_PORTOFFSET_RUN_ID"
 REGISTRY_FILENAME = "owned_process_groups.json"
@@ -41,8 +43,11 @@ ROSBAG_TOPICS = (
     "/aic_controller/controller_state",
     "/aic_controller/pose_commands",
     "/left_camera/image",
+    "/left_camera/depth_image",
     "/center_camera/image",
+    "/center_camera/depth_image",
     "/right_camera/image",
+    "/right_camera/depth_image",
 )
 
 CLI_DEFAULTS = {
@@ -74,6 +79,7 @@ CLI_DEFAULTS = {
     "resume": False,
     "val_ratio": 0.15,
     "test_ratio": 0.15,
+    "auto_annotate_ports": False,
     "push_to_hub": False,
     "hf_repo_id": "team-physic/aic-align",
     "hf_revision": "",
@@ -115,6 +121,9 @@ CLI_DEFAULTS = {
     "settle_stable_observations": 3,
     "settle_poll_s": 0.02,
     "max_attempts": 2,
+    "haptic_guard": True,
+    "haptic_force_threshold_n": 20.0,
+    "haptic_contact_duration_s": 0.2,
     # World and lighting.
     "randomize_lighting": True,
     "light_intensity_scale_min": 0.65,
@@ -163,7 +172,6 @@ BASE_ROBOT_HOME = {
 
 LIMITS = {
     "nic_translation": (-0.0215, 0.0234),
-    "nic_yaw": (-0.17453292519943295, 0.17453292519943295),
     "sc_translation": (-0.06, 0.055),
     "sfp_board_x": (0.13, 0.17),
     "sfp_board_y": (-0.25, -0.20),

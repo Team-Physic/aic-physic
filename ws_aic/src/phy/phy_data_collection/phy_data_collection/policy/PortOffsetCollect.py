@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -20,12 +22,14 @@ from aic_model.policy import (
 from aic_task_interfaces.msg import Task
 from geometry_msgs.msg import Vector3, Wrench
 from rclpy.duration import Duration
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
+from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 from tf2_ros import TransformException
 
-from phy_policy.data_generator import dataset, motion
-from phy_policy.data_generator.geometry import transform_matrix
+from . import dataset, motion
+from .geometry import transform_matrix
 
 
 TOOL0_TCP_Z = 0.1965
@@ -50,6 +54,7 @@ COLORS = {
     "reset": "\033[0m",
     "bold": "\033[1m",
 }
+COLLECTION_POLICIES = {"board-view", "descent", "near-port"}
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -121,6 +126,13 @@ class PortOffsetCollect(Policy):
     def __init__(self, parent_node):
         """현재 img2pos 수집에 필요한 설정과 ROS 실행 상태만 초기화한다."""
         os.environ.setdefault("AIC_COLLECT_STEPS", "1000")
+        self.collection_policy = os.environ.get(
+            "AIC_IMG2POS_COLLECTION_POLICY", self.collection_policy
+        ).strip().lower()
+        if self.collection_policy not in COLLECTION_POLICIES:
+            raise ValueError(
+                f"unsupported collection policy: {self.collection_policy or 'empty'}"
+            )
         Policy.__init__(self, parent_node)
 
         fps = int(os.environ.get("AIC_COLLECT_FPS", "0"))
@@ -155,6 +167,19 @@ class PortOffsetCollect(Policy):
         self.settle_poll_s = max(0.001, _env_float("AIC_COLLECT_SETTLE_POLL_SEC", 0.02))
         self.max_attempts = max(
             1, int(_env_float("AIC_COLLECT_MAX_ATTEMPTS", 2.0))
+        )
+        self.haptic_guard_enabled = _env_bool("AIC_COLLECT_HAPTIC_GUARD", True)
+        self.haptic_force_threshold_n = max(
+            0.0, _env_float("AIC_COLLECT_HAPTIC_FORCE_THRESHOLD_N", 20.0)
+        )
+        self.haptic_contact_duration_s = max(
+            0.0, _env_float("AIC_COLLECT_HAPTIC_CONTACT_DURATION_S", 0.2)
+        )
+        self.haptic_baseline_samples = max(
+            3, int(_env_float("AIC_COLLECT_HAPTIC_BASELINE_SAMPLES", 10.0))
+        )
+        self.haptic_baseline_timeout_s = max(
+            0.1, _env_float("AIC_COLLECT_HAPTIC_BASELINE_TIMEOUT_S", 2.0)
         )
         self.color_log = _env_bool("AIC_COLLECT_COLOR_LOG", True) and not os.environ.get("NO_COLOR")
         self.rng = np.random.default_rng(
@@ -202,6 +227,43 @@ class PortOffsetCollect(Policy):
         self.test_ratio = _env_float("AIC_IMG2POS_TEST_RATIO", 0.15)
         self.trial_split = os.environ.get("AIC_IMG2POS_TRIAL_SPLIT", "").strip().lower()
         self.min_visible_cameras = max(1, int(os.environ.get("AIC_IMG2POS_MIN_VISIBLE_CAMERAS", "2")))
+        self.auto_annotate_ports = _env_bool(
+            "AIC_IMG2POS_AUTO_ANNOTATE_PORTS", False
+        )
+        self.auto_annotation_visibility = (
+            self.auto_annotate_ports
+            and _env_bool("AIC_IMG2POS_DEPTH_VISIBILITY", False)
+        )
+        self.annotation_depth_timeout_s = max(
+            0.0,
+            _env_float(
+                "AIC_IMG2POS_ANNOTATION_DEPTH_TIMEOUT_SEC",
+                self.sync_wait_timeout_s,
+            ),
+        )
+        self.annotation_depth_max_skew_ns = int(
+            max(
+                0.0,
+                _env_float("AIC_IMG2POS_ANNOTATION_DEPTH_MAX_SKEW_SEC", 0.25),
+            )
+            * 1_000_000_000
+        )
+        self._depth_condition = threading.Condition()
+        self._depth_buffers = {
+            camera: deque(maxlen=32) for camera in ("left", "center", "right")
+        }
+        self._depth_subscriptions = []
+        if self.auto_annotation_visibility:
+            for camera in self._depth_buffers:
+                subscription = parent_node.create_subscription(
+                    Image,
+                    f"/{camera}_camera/depth_image",
+                    lambda message, camera=camera: self._on_depth_image(
+                        camera, message
+                    ),
+                    qos_profile_sensor_data,
+                )
+                self._depth_subscriptions.append(subscription)
         self.capture_count = 0
         self.record = _env_bool("AIC_IMG2POS_RECORD", True)
         xy_limit = _env_float("AIC_PORT_COLLECT_XY_LIMIT_MM", 50.0) / 1000.0
@@ -251,8 +313,41 @@ class PortOffsetCollect(Policy):
         self.get_logger().info(
             f"[PortOffsetCollect] Ready: policy={self.collection_policy}, "
             f"steps={self.collect_steps}, "
-            f"dataset={self.dataset_dir}, split={self.trial_split or 'hash'}"
+            f"dataset={self.dataset_dir}, split={self.trial_split or 'hash'}, "
+            f"depth_visibility={self.auto_annotation_visibility}, "
+            f"haptic_guard={self.haptic_guard_enabled}"
         )
+
+    def _on_depth_image(self, camera: str, message: Image) -> None:
+        """camera별 최근 depth frame을 보관하고 대기 중인 capture를 깨운다."""
+        with self._depth_condition:
+            self._depth_buffers[camera].append(message)
+            self._depth_condition.notify_all()
+
+    def depth_image_at(self, camera: str, capture_stamp_ns: int) -> Image | None:
+        """RGB와 가장 가까운 허용 범위의 depth frame을 제한 시간 동안 찾는다."""
+        deadline = time.monotonic() + self.annotation_depth_timeout_s
+        with self._depth_condition:
+            while True:
+                stamped = [
+                    (dataset._stamp_ns(message.header.stamp), message)
+                    for message in self._depth_buffers[camera]
+                ]
+                stamped = [(stamp, message) for stamp, message in stamped if stamp is not None]
+                candidates = [
+                    (abs(stamp - capture_stamp_ns), message)
+                    for stamp, message in stamped
+                    if abs(stamp - capture_stamp_ns)
+                    <= self.annotation_depth_max_skew_ns
+                ]
+                if candidates and any(
+                    stamp >= capture_stamp_ns for stamp, _message in stamped
+                ):
+                    return min(candidates, key=lambda item: item[0])[1]
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return min(candidates, key=lambda item: item[0])[1] if candidates else None
+                self._depth_condition.wait(remaining)
 
     def _watch_stop_file(self) -> None:
         """stop file이 생기면 policy 프로세스를 종료한다."""
@@ -305,6 +400,73 @@ class PortOffsetCollect(Policy):
         port = f"task_board/{task.target_module_name}/{task.port_name}_link"
         entrance = f"{port}_entrance"
         return entrance if self._wait_for_tf("base_link", entrance, 2.0) else port
+
+    def _annotation_port_frames(self, task: Task, fallback_frame: str) -> list[dict]:
+        """task card mask에서 현재 scene에 생성된 port entrance frame을 나열한다."""
+        match = re.search(r"(?:^|_)cards([01]+)(?:_|$)", str(task.id))
+        connector = dataset._connector(task).lower()
+        if match is None or connector not in {"sfp", "sc"}:
+            rail = int(dataset._last_number(task.target_module_name, 0))
+            port = (
+                int(dataset._last_number(task.port_name, 0))
+                if connector == "sfp"
+                else 0
+            )
+            class_id, label = dataset.port_annotation_class(connector, rail, port)
+            return [
+                {
+                    "class_id": class_id,
+                    "label": label,
+                    "port_type": connector,
+                    "instance_id": str(task.port_name),
+                    "frame_id": fallback_frame,
+                }
+            ]
+        active_rails = [
+            rail for rail, enabled in enumerate(reversed(match.group(1))) if enabled == "1"
+        ]
+        if connector == "sfp":
+            ports = []
+            for rail in active_rails:
+                for port in range(dataset.SFP_PORT_COUNT):
+                    class_id, label = dataset.port_annotation_class(
+                        connector, rail, port
+                    )
+                    ports.append(
+                        {
+                            "class_id": class_id,
+                            "label": label,
+                            "port_type": connector,
+                            "instance_id": f"nic_card_mount_{rail}/sfp_port_{port}",
+                            "frame_id": (
+                                f"task_board/nic_card_mount_{rail}/"
+                                f"sfp_port_{port}_link_entrance"
+                            ),
+                        }
+                    )
+            return ports
+        class_id, label = dataset.port_annotation_class(connector, 0)
+        return [
+            {
+                "class_id": class_id,
+                "label": label,
+                "port_type": connector,
+                "instance_id": f"sc_port_{rail}/sc_port_base",
+                "frame_id": f"task_board/sc_port_{rail}/sc_port_base_link_entrance",
+            }
+            for rail in active_rails
+        ]
+
+    def _snapshot_annotation_ports(
+        self, task: Task, fallback_frame: str
+    ) -> list[dict]:
+        """현재 scene의 port frame들을 trial 고정 base_link Transform으로 저장한다."""
+        ports = self._annotation_port_frames(task, fallback_frame)
+        snapshots = []
+        for port in ports:
+            stamped = self.lookup_latest_stamped("base_link", port["frame_id"])
+            snapshots.append({**port, "transform": stamped.transform})
+        return snapshots
 
     def _cable_tip_frame(self, task: Task) -> str:
         """task 정보에서 사용 가능한 cable tip frame을 선택한다."""
@@ -362,6 +524,7 @@ class PortOffsetCollect(Policy):
             "approach_steps": counts["approach"],
             "collect_steps": counts["collect"],
             "collect_attempts": counts["attempts"],
+            "haptic_contacts": counts["haptic_contacts"],
         }
         summary_path = episode_dir / "episode_summary.json"
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -382,7 +545,13 @@ class PortOffsetCollect(Policy):
         episode_name = time.strftime("%Y%m%d_%H%M%S") + f"_{task.id}"
         episode_dir = self.capture_root / episode_name
         episode_dir.mkdir(parents=True, exist_ok=True)
-        counts = {"lift_up": 0, "approach": 0, "collect": 0, "attempts": 0}
+        counts = {
+            "lift_up": 0,
+            "approach": 0,
+            "collect": 0,
+            "attempts": 0,
+            "haptic_contacts": 0,
+        }
         if not self.record:
             return self._finish(episode_dir, task, counts, "recording_disabled")
 
@@ -402,6 +571,19 @@ class PortOffsetCollect(Policy):
             port_snapshot = self.lookup_latest_stamped("base_link", port_frame)
         except TransformException as exc:
             return self._finish(episode_dir, task, counts, "port_tf_snapshot_failed", str(exc))
+
+        annotation_ports = []
+        if self.auto_annotate_ports:
+            try:
+                annotation_ports = self._snapshot_annotation_ports(task, port_frame)
+            except TransformException as exc:
+                return self._finish(
+                    episode_dir,
+                    task,
+                    counts,
+                    "annotation_port_tf_snapshot_failed",
+                    str(exc),
+                )
 
         board_snapshot = None
         if self.collection_policy == "board-view":
@@ -423,6 +605,7 @@ class PortOffsetCollect(Policy):
             "counts": counts,
             "port_snapshot": port_snapshot,
             "board_snapshot": board_snapshot,
+            "annotation_ports": annotation_ports,
             "cable_tip_frame": cable_tip_frame,
             "plug_offset": dataset.plug_reference_offset(task, cable_tip_frame),
             **motion.control_for(task),

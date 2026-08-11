@@ -6,3 +6,15 @@ channels = [
   "robostack-kilted",
   "conda-forge",
 ]
+
+[package.host-dependencies]
+ros-kilted-aic-control-interfaces = { path = "../../aic/aic_interfaces/aic_control_interfaces" }
+ros-kilted-aic-model = { path = "../../aic/aic_model" }
+ros-kilted-aic-model-interfaces = { path = "../../aic/aic_interfaces/aic_model_interfaces" }
+ros-kilted-aic-task-interfaces = { path = "../../aic/aic_interfaces/aic_task_interfaces" }
+
+[package.build-dependencies]
+ros-kilted-aic-control-interfaces = { path = "../../aic/aic_interfaces/aic_control_interfaces" }
+ros-kilted-aic-model = { path = "../../aic/aic_model" }
+ros-kilted-aic-model-interfaces = { path = "../../aic/aic_interfaces/aic_model_interfaces" }
+ros-kilted-aic-task-interfaces = { path = "../../aic/aic_interfaces/aic_task_interfaces" }

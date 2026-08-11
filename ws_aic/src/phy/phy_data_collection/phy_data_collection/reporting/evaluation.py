@@ -35,6 +35,30 @@ def _vector(row: dict[str, Any], field: str) -> tuple[float, float, float]:
     return vector
 
 
+def _actual_sampling_tier_label(row: dict[str, Any]) -> str:
+    """신규·legacy row의 촬영 시점 offset을 실제 near-port tier로 분류한다."""
+    if row.get("collection_policy", "near-port") != "near-port":
+        return "not_applicable"
+    if "actual_sampling_tier_mm" in row:
+        actual_tier_mm = row["actual_sampling_tier_mm"]
+        return "out_of_range" if actual_tier_mm is None else str(actual_tier_mm)
+
+    offset_field = (
+        "sampling_offset_xyz_m"
+        if "sampling_offset_xyz_m" in row
+        else "target_xyz_m"
+    )
+    extent_mm = max(abs(value) for value in _vector(row, offset_field)) * 1000.0
+    return next(
+        (
+            str(float(threshold_mm))
+            for threshold_mm in (2, 5, 10, 50)
+            if extent_mm <= threshold_mm
+        ),
+        "out_of_range",
+    )
+
+
 def _percentile(values: list[float], percentile: float) -> float:
     """선형 보간 percentile을 반환한다."""
     if not values:
@@ -126,6 +150,23 @@ def summarize_dataset(dataset_dir: Path) -> dict[str, Any]:
                 "not_applicable"
                 if row.get("sampling_tier_mm") is None
                 else str(row["sampling_tier_mm"])
+                for row in captures.values()
+            )
+        ),
+        "captures_by_planned_sampling_tier_mm": dict(
+            Counter(
+                "not_applicable"
+                if row.get("planned_sampling_tier_mm", row.get("sampling_tier_mm"))
+                is None
+                else str(
+                    row.get("planned_sampling_tier_mm", row.get("sampling_tier_mm"))
+                )
+                for row in captures.values()
+            )
+        ),
+        "captures_by_actual_sampling_tier_mm": dict(
+            Counter(
+                _actual_sampling_tier_label(row)
                 for row in captures.values()
             )
         ),
