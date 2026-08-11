@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phy_data_collection.paths import PROJECT_ROOT
+from .paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 WS_SRC = ROOT / "ws_aic" / "src"
 PIXI_WS = WS_SRC
-POLICY_PACKAGE_ROOT = WS_SRC / "phy" / "phy_policy"
+PACKAGE_ROOT = WS_SRC / "phy" / "phy_data_collection"
 DATASET_ROOT = ROOT / "ws_aic" / "data" / "img2pos"
 COLLECTION_LOG_ROOT = ROOT / "ws_aic" / "logs" / "data_collection"
 ROSBAG_ROOT = ROOT / "rosbags" / "portoffset"
@@ -25,13 +25,8 @@ BASE_ROS_GZ_BRIDGE_CONFIG_PATH = (
 )
 EPISODE_TRACKING_DIR = Path("/tmp/aic_episodes")
 
-COLLECTION_POLICY_MODULES = {
-    "board-view": "phy_policy.ros.BoardViewCollect",
-    "descent": "phy_policy.ros.DescentCollect",
-    "near-port": "phy_policy.ros.NearPortCollect",
-}
-COLLECTION_POLICY_CHOICES = tuple(COLLECTION_POLICY_MODULES)
-POLICY_MODULE = COLLECTION_POLICY_MODULES["near-port"]
+COLLECTION_POLICY_CHOICES = ("board-view", "descent", "near-port")
+POLICY_MODULE = "phy_data_collection.policy.PortOffsetCollect"
 ENGINE_SETUP = "/ws_aic/install/setup.bash"
 RUN_MARKER_ENV = "AIC_PORTOFFSET_RUN_ID"
 REGISTRY_FILENAME = "owned_process_groups.json"

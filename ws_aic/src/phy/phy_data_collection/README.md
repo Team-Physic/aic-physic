@@ -5,6 +5,19 @@
 trial별 pose 수렴 후 이미지를 저장하며, 여러 headless simulator를 격리해 병렬 실행할
 수 있습니다.
 
+## 소스 구조
+
+```text
+phy_data_collection/
+├── runner/     # CLI, trial/world 생성, process·rosbag·업로드 조율
+├── policy/     # AIC PortOffsetCollect, motion, image·annotation 저장
+└── reporting/  # dataset summary와 prediction 평가
+```
+
+수집 전용 policy는 runner와 같은 ROS 패키지에 포함되지만 실행 책임은 분리되어
+있습니다. runner가 `aic_model`을 시작하면 engine이 `policy.PortOffsetCollect`를
+동적으로 불러옵니다.
+
 ## 실행
 
 명령은 Pixi workspace인 `ws_aic/src`에서 실행합니다.
@@ -28,7 +41,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 
 ```bash
 cd ws_aic/src
-pixi reinstall --frozen ros-kilted-phy-policy ros-kilted-phy-data-collection
+pixi reinstall --frozen ros-kilted-phy-data-collection
 ```
 
 ## 처리 흐름
@@ -71,7 +84,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--time-limit-s` | `600` | AIC trial config에 전달할 제한시간(초) |
 | `--trial-timeout-s` | 자동 (`780`) | runner가 summary를 기다리는 시간; 미지정 시 `time-limit-s + 180` |
 | `--collection-policy` | `near-port` | `board-view`, `descent`, `near-port` 중 선택 |
-| `--policy` | 정책별 자동 선택 | `collection-policy`에 연결된 ROS policy module을 직접 override |
+| `--policy` | `phy_data_collection.policy.PortOffsetCollect` | ROS policy module을 직접 override |
 | `--policy-start-wait-s` | `5` | simulator 시작 뒤 policy를 실행하기 전 대기시간(초) |
 | `--dataset-version` | 자동 생성 | `ws_aic/data/img2pos/` 아래 새 version 경로 |
 | `--resume` | 꺼짐 | 기존 version에 명시적으로 이어서 수집 |
@@ -86,6 +99,9 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--worker-start-delay-s` | `2` | 병렬 worker 시작 간격(초) |
 | `--robot-joint-noise-rad` | `0.069813` | home joint 각 축의 독립 대칭 잡음 범위 |
 | `--cable-rotation-noise-rad` | `0.04` | 기준 cable 자세 대비 전체 회전각 상한 |
+
+세 수집 구간은 모두 `PortOffsetCollect`에서 실행되며, `--collection-policy` 값으로
+sampling과 stage만 선택합니다. 별도 ROS policy module은 필요하지 않습니다.
 
 dataset version을 생략하면 실행 시각으로 새 이름을 만들고, 기존 version은 `--resume`
 없이는 수정하지 않습니다. 따라서 Hugging Face의 기존 PoC branch도 자동으로 덮어쓰지

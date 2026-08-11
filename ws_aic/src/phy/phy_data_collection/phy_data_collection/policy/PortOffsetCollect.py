@@ -28,8 +28,8 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 from tf2_ros import TransformException
 
-from phy_policy.data_generator import dataset, motion
-from phy_policy.data_generator.geometry import transform_matrix
+from . import dataset, motion
+from .geometry import transform_matrix
 
 
 TOOL0_TCP_Z = 0.1965
@@ -54,6 +54,7 @@ COLORS = {
     "reset": "\033[0m",
     "bold": "\033[1m",
 }
+COLLECTION_POLICIES = {"board-view", "descent", "near-port"}
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -125,6 +126,13 @@ class PortOffsetCollect(Policy):
     def __init__(self, parent_node):
         """현재 img2pos 수집에 필요한 설정과 ROS 실행 상태만 초기화한다."""
         os.environ.setdefault("AIC_COLLECT_STEPS", "1000")
+        self.collection_policy = os.environ.get(
+            "AIC_IMG2POS_COLLECTION_POLICY", self.collection_policy
+        ).strip().lower()
+        if self.collection_policy not in COLLECTION_POLICIES:
+            raise ValueError(
+                f"unsupported collection policy: {self.collection_policy or 'empty'}"
+            )
         Policy.__init__(self, parent_node)
 
         fps = int(os.environ.get("AIC_COLLECT_FPS", "0"))

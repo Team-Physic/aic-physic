@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 from geometry_msgs.msg import Transform
 
-from phy_policy.data_generator.geometry import pose_matrix, quaternion_matrix
+from .geometry import pose_matrix, quaternion_matrix
 
 
 SFP_REFERENCE_OFFSET = np.array([0.0, 0.0021125, 0.0], dtype=float)

@@ -21,17 +21,17 @@ from pathlib import Path
 from queue import Empty
 from typing import Any
 
-from phy_data_collection.cli import parse_args
-from phy_data_collection.constants import (
+from phy_data_collection.runner.cli import parse_args
+from phy_data_collection.runner.constants import (
     COLLECTION_LOG_ROOT,
-    COLLECTION_POLICY_MODULES,
     CONFIG_DIR,
     MIN_CLEARANCE_MM,
+    POLICY_MODULE,
     REGISTRY_FILENAME,
     TRIAL_TIMEOUT_GRACE_S,
 )
-from phy_data_collection.evaluation import summarize_dataset
-from phy_data_collection.lifecycle import (
+from phy_data_collection.reporting.evaluation import summarize_dataset
+from phy_data_collection.runner.lifecycle import (
     OwnedProcessGroup,
     cleanup_stale_processes,
     process_groups_with_cmdline_marker,
@@ -40,7 +40,7 @@ from phy_data_collection.lifecycle import (
     terminate_owned_group,
     write_group_registry,
 )
-from phy_data_collection.runtime import (
+from phy_data_collection.runner.runtime import (
     RosbagSession,
     dataset_dir,
     known_episode_summaries,
@@ -55,8 +55,8 @@ from phy_data_collection.runtime import (
     wait_for_trial_summary,
     write_inputs,
 )
-from phy_data_collection.scenario import make_trial_config
-from phy_data_collection.world import (
+from phy_data_collection.runner.scenario import make_trial_config
+from phy_data_collection.runner.world import (
     log_trial_randomization,
     write_randomized_world,
 )
@@ -489,7 +489,7 @@ def _prepare_args(args: argparse.Namespace) -> None:
     if not 1 <= args.min_visible_cameras <= 3:
         raise ValueError("min-visible-cameras must be in [1, 3]")
     if not args.policy.strip():
-        args.policy = COLLECTION_POLICY_MODULES[args.collection_policy]
+        args.policy = POLICY_MODULE
     if args.ros_domain_id_base < 0 or args.ros_domain_id_base + args.workers - 1 > 232:
         raise ValueError("worker ROS domain IDs must be in [0, 232]")
     if args.zenoh_port_base < 1024 or args.zenoh_port_base + args.workers - 1 > 65535:

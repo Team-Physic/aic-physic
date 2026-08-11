@@ -21,7 +21,7 @@ from .constants import (
     ANSI_COLORS,
     ANNOTATION_ROBOT_DESCRIPTION_PATH,
     BASE_ROS_GZ_BRIDGE_CONFIG_PATH,
-    POLICY_PACKAGE_ROOT,
+    PACKAGE_ROOT,
     DATASET_ROOT,
     EPISODE_TRACKING_DIR,
     PIXI_WS,
@@ -325,7 +325,7 @@ def _policy_environment(
 ) -> dict[str, str]:
     """PortOffsetCollect가 사용할 ROS 2 및 데이터 수집 환경변수를 구성한다."""
     env = os.environ.copy()
-    python_paths = [str(POLICY_PACKAGE_ROOT)]
+    python_paths = [str(PACKAGE_ROOT)]
     if env.get("PYTHONPATH"):
         python_paths.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(python_paths)

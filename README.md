@@ -28,8 +28,7 @@ AI for Industry Challenge는 시뮬레이션 환경에서 UR5e 로봇 팔이 케
 | 경로 | 역할 |
 | --- | --- |
 | `ws_aic/src/aic/` | 저장소에 포함된 공식 [`intrinsic-dev/aic`](https://github.com/intrinsic-dev/aic) Toolkit 소스 |
-| `ws_aic/src/phy/phy_policy/` | 공식 example policy 형식을 따르는 Team Physic 정책 패키지 |
-| `ws_aic/src/phy/phy_data_collection/` | randomized trial·rosbag·policy lifecycle runner |
+| `ws_aic/src/phy/phy_data_collection/` | 수집 runner, AIC policy, dataset 저장·평가 패키지 |
 | `ws_aic/data/` | 로컬 데이터셋 기본 출력 위치, Git 추적 제외 |
 | `ws_aic/model/` | 로컬 모델 파일 위치, Git 추적 제외 |
 | `docs/git-conventions.md` | 브랜치 및 커밋 메시지 규칙 |

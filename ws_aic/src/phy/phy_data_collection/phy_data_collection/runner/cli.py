@@ -60,7 +60,7 @@ def _add_trial_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--policy",
         default="",
-        help="Expert override for the ROS policy module selected by --collection-policy.",
+        help="Expert override for the ROS policy module.",
     )
     _add_argument(parser, "policy_start_wait_s", type=float)
     _add_argument(parser, "robot_joint_noise_rad", type=float)

@@ -10,8 +10,8 @@ import numpy as np
 from geometry_msgs.msg import Point, Pose, Quaternion, Transform
 from tf2_ros import TransformException
 
-from phy_policy.data_generator import dataset
-from phy_policy.data_generator.geometry import (
+from . import dataset
+from .geometry import (
     axis_angle_quaternion,
     multiply_quaternions,
     quaternion_matrix,
