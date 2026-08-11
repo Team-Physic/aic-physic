@@ -89,12 +89,32 @@ def image_to_bgr(policy, message, camera: str) -> np.ndarray | None:
     return cv2.cvtColor(image, cv2.COLOR_RGB2BGR) if message.encoding == "rgb8" else image.copy()
 
 
-def _camera_matrix(camera_info) -> np.ndarray | None:
-    """CameraInfo의 intrinsic 행렬을 검증해 반환한다."""
+def _camera_matrix(camera_info, image=None) -> np.ndarray | None:
+    """CameraInfo intrinsic을 검증하고 필요하면 image 해상도로 변환한다."""
     if camera_info is None or len(camera_info.k) < 9:
         return None
     matrix = np.asarray(camera_info.k, dtype=float).reshape(3, 3)
-    return matrix if abs(matrix[0, 0]) >= 1e-9 and abs(matrix[1, 1]) >= 1e-9 else None
+    if abs(matrix[0, 0]) < 1e-9 or abs(matrix[1, 1]) < 1e-9:
+        return None
+    if image is None:
+        return matrix
+
+    source_width = int(getattr(camera_info, "width", 0))
+    source_height = int(getattr(camera_info, "height", 0))
+    target_width = int(getattr(image, "width", 0))
+    target_height = int(getattr(image, "height", 0))
+    if min(source_width, source_height, target_width, target_height) <= 0:
+        return None
+    if source_width * target_height != source_height * target_width:
+        return None
+
+    # Gazebo depth/RGB sensor의 CameraInfo가 같은 topic에 교차로 발행될 수
+    # 있다. 두 센서는 pose/FOV/aspect ratio가 같으므로 depth 보정값이
+    # 들어와도 RGB image 해상도로 intrinsic을 확대하면 같은 ray가 된다.
+    scale = np.diag(
+        [target_width / source_width, target_height / source_height, 1.0]
+    )
+    return scale @ matrix
 
 
 def _base_to_camera(policy, observation, camera: str) -> np.ndarray:
@@ -112,7 +132,8 @@ def _points_projection(
 ) -> dict[str, Any]:
     """모든 base_link 점이 지정 camera의 유효 영상 영역에 보이는지 검사한다."""
     message = image_for_camera(observation, camera)
-    intrinsic = _camera_matrix(camera_info_for(observation, camera))
+    camera_info = camera_info_for(observation, camera)
+    intrinsic = _camera_matrix(camera_info, message)
     if message is None or message.width == 0 or message.height == 0 or intrinsic is None:
         return {"visible": False, "reason": "missing_image_or_intrinsics"}
     try:
