@@ -154,8 +154,8 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | 정책 | 동작 |
 | --- | --- |
 | `board-view` | center camera optical axis가 보드 중앙을 향하도록 750~850mm 거리에서 횡방향 위치와 각도를 무작위화하고, 목표 port가 영상 안에 있는 capture만 저장 |
-| `descent` | 선택 포트를 향해 550mm부터 20mm 안전거리까지 먼 순서로 내려오며 거리·횡방향 위치·각도를 무작위화 |
-| `near-port` | 기존 20mm 안전거리 기준 50/10/5/2mm coarse/near tier를 수집 |
+| `descent` | 선택 포트를 향해 550mm부터 20mm 기준 거리까지 먼 순서로 내려오며 거리·횡방향 위치·각도를 무작위화 |
+| `near-port` | 20mm 기준 거리에서 50/10/5/2mm coarse/near tier를 수집 |
 
 `--port-type sfp`면 각 trial이 31개 non-empty 5-bit card 조합에서 하나를 uniform
 추출합니다. `--port-type sc`면 3개 non-empty 2-bit 조합에서 하나를 uniform 추출합니다.
@@ -176,7 +176,7 @@ SC:  Uniform({01, 10, 11})
 | --- | ---: | --- |
 | `--dx-min-mm`, `--dx-max-mm` | `-50`, `50` | port-local X 범위 |
 | `--dy-min-mm`, `--dy-max-mm` | `-50`, `50` | port-local Y 범위 |
-| `--dz-min-mm`, `--dz-max-mm` | `0`, `50` | 최소 안전거리에 더하는 비관통 방향 port-local Z 범위 |
+| `--dz-min-mm`, `--dz-max-mm` | `0`, `50` | 기준 거리에 더하는 비관통 방향 port-local Z 범위 |
 | `--sampling-tiers-mm` | `50,10,5,2` | coarse 및 근접 위치 sampling tier |
 | `--sampling-tier-weights` | `1,1,1,1` | tier별 capture quota 비율 |
 | `--port-roll-limit-rad` | `0.436332` | 대칭 roll 범위 |
@@ -186,7 +186,7 @@ SC:  Uniform({01, 10, 11})
 | `--pitch-min-rad`, `--pitch-max-rad` | 미지정 | 비대칭 pitch 범위 override |
 | `--yaw-min-rad`, `--yaw-max-rad` | 미지정 | 비대칭 yaw 범위 override |
 | `--rpy-norm-max-rad` | 미지정 | 생성된 RPY vector norm 상한 |
-| `--base-z-offset-mm` | `20` | descent/near-port가 유지할 접근축 최소 안전거리 |
+| `--base-z-offset-mm` | `20` | descent/near-port의 접근축 명령 기준 거리 |
 | `--board-distance-min-mm`, `--board-distance-max-mm` | `750`, `850` | board-view center camera optical 거리 범위 |
 | `--board-lateral-limit-mm` | `30` | board-view camera-plane X/Y 대칭 범위 |
 | `--board-angle-limit-rad` | `0.261799` | board-view RPY 대칭 범위 |
@@ -194,9 +194,9 @@ SC:  Uniform({01, 10, 11})
 | `--descent-lateral-limit-mm` | `40` | descent port-local X/Y 대칭 범위 |
 | `--descent-angle-limit-rad` | `0.349066` | descent RPY 대칭 범위 |
 
-기본 40 capture는 각 tier에 10개씩 배정됩니다. X/Y는 `±tier`, Z는 20mm 최소
-안전거리에 `0~tier`를 더하고 RPY 범위도 tier 비율로 축소합니다. 첫 sample의 추가
-translation과 RPY는 모두 0이지만 port와의 안전거리 20mm는 유지합니다. 물리 부하가
+기본 40 capture는 각 tier에 10개씩 배정됩니다. X/Y는 `±tier`, Z는 20mm 기준
+거리에 `0~tier`를 더하고 RPY 범위도 tier 비율로 축소합니다. 첫 sample의 추가
+translation과 RPY는 모두 0이며 명령 거리는 20mm입니다. 물리 부하가
 작은 coarse tier부터 near tier 순서로 진행하며, 각 tier 내부 값은 무작위화합니다.
 `--dz-min-mm`는 음수를 허용하지 않고 `--base-z-offset-mm`는 20mm 미만을 허용하지
 않습니다.
@@ -229,10 +229,10 @@ camera 수에 포함합니다. 따라서 한 camera가 robot arm에 가려져도
 capture를 승인합니다. 이미지 한 장이라도 저장하지 못하면 partial
 capture를 삭제하고 재시도합니다. port 가시성 조건을 통과하지 못하면 같은 waypoint를
 반복하지 않고 다음 waypoint로 이동합니다. 준비된 waypoint를 모두 사용해도 저장된
-capture 수가 목표보다 적으면 새 waypoint 묶음을 생성해 계속 수집합니다. `descent`와
-`near-port`는 실제 TF의 접근축 거리가 20mm 이상인지 검사하고, `near-port`는 추가로
-20mm 안전거리를 제외한 port-local offset이 배정된 sampling tier 안에 있는지도
-검사합니다. 명령 직후 frame은
+capture 수가 목표보다 적으면 새 waypoint 묶음을 생성해 계속 수집합니다. `near-port`는
+실제 TF에서 20mm 기준 거리를 제외한 port-local offset이 배정된 sampling tier 안에
+있는지 검사합니다. 실제 접근축 거리는 metadata로 기록하지만 capture 승인 조건으로
+사용하지 않습니다. 명령 직후 frame은
 사용하지 않고 controller reference와 실제 TCP 움직임이 수렴한 이후의 다음 camera
 frame을 선택합니다. 조건을 통과하지 못한 tier는 재시도하며 목표 capture 수를 채우지
 못한 trial은 실패 처리합니다.
@@ -245,12 +245,12 @@ force가 임계치를 지정 시간 이상 넘으면 현재 자세에서 정지�
 
 임피던스 제어에서는 외력과 유한 stiffness 때문에 reference와 실제 TCP 사이에
 정상상태 tracking error가 남을 수 있습니다. 이 값은 log 진단용으로만 기록하고 동작
-완료 조건으로 사용하지 않습니다. 대신 실제 TF label을 저장하고, `descent`와
-`near-port`의 최소거리 검사 및 `near-port`의 tier 검사가 최종 sample 정확도와
-안전거리를 보장합니다.
+완료 조건으로 사용하지 않습니다. 실제 TF label과 접근축 거리를 저장하고,
+`near-port`의 tier 검사로 sample 정확도를 확인합니다. 이동 중 접촉 안전은 haptic
+guard가 담당하며, 접촉을 감지하면 정지·후퇴하고 해당 waypoint를 건너뜁니다.
 
 `collection_summary.json`의 `near_port_sampling_offset_box_coverage_mm`은 `near-port`
-capture만 대상으로, 촬영 시점 TF에서 안전거리를 제외한 실제 port-local offset이 각
+capture만 대상으로, 촬영 시점 TF에서 기준 거리를 제외한 실제 port-local offset이 각
 ±2/5/10/50mm box 안에 들어온 수와 비율입니다. `target_xyz_m`에는 추론과 제어에 필요한
 안전거리까지 포함된 `base_link` correction을 그대로 저장합니다.
 
@@ -400,7 +400,7 @@ keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(
 | `annotations`, `annotation_labels` | camera별 YOLO-pose TXT 상대 경로와 `SFP_<rail><port>` label 목록 |
 | `collection_policy` | `board-view`, `descent`, `near-port` 수집 구간 |
 | `target_xyz_m` | 공통 촬영 시점 `base_link`의 `port_entrance - plug_reference` correction |
-| `sampling_offset_xyz_m` | 최소 안전거리를 제외한 실제 port-local XYZ; tier 분포 감사용 |
+| `sampling_offset_xyz_m` | 명령 기준 거리를 제외한 실제 port-local XYZ; tier 분포 감사용 |
 | `sampling_tier_mm` | near-port capture의 coarse/near tier; 다른 정책은 `null` |
 | `view_distance_m` | 촬영 시점 plug와 port 사이 접근축 거리 |
 | `capture_stamp_ns` | 묶인 camera images의 공통 촬영 ROS 시각 |

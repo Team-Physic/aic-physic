@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
-from geometry_msgs.msg import Point, Pose, Quaternion
+from geometry_msgs.msg import Point, Pose, Quaternion, Transform
 
 from phy_data_collection.policy import motion
 from phy_data_collection.runner.cli import build_parser
@@ -86,6 +86,9 @@ class _Policy:
 
     def get_logger(self) -> _Logger:
         return self.logger
+
+    def log_text(self, message: str, _color: str) -> str:
+        return message
 
     def set_pose_target(
         self,
@@ -225,3 +228,117 @@ def test_cli_exposes_haptic_guard_defaults() -> None:
     assert args.haptic_guard is True
     assert args.haptic_force_threshold_n == 20.0
     assert args.haptic_contact_duration_s == 0.2
+
+
+def test_collect_saves_sample_below_command_base_distance(monkeypatch) -> None:
+    policy = _Policy()
+    policy.collection_policy = "near-port"
+    policy.collect_steps = 1
+    policy.max_attempts = 1
+    policy.step_sleep_s = 0.0
+    policy.haptic_guard_enabled = False
+    policy.base_z_offset = 0.020
+    policy.samples = [
+        {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "roll": 0.0,
+            "pitch": 0.0,
+            "yaw": 0.0,
+            "tier_m": 0.050,
+            "distance_m": 0.020,
+        }
+    ]
+    port_tf = Transform(rotation=Quaternion(w=1.0))
+    state = {
+        "port_axis": np.array([0.0, 0.0, -1.0]),
+        "target_tcp_from_plug": np.zeros(3),
+    }
+    policy.planner = SimpleNamespace(
+        build_pose=lambda *_args, **_kwargs: (_pose(), state)
+    )
+    policy.lookup_transform = lambda *_args: Transform(rotation=Quaternion(w=1.0))
+    policy.lookup_transform_at = lambda *_args: SimpleNamespace(transform=Transform())
+
+    observation = _observation((0.0, 0.0, 0.0), 1_000_000_000)
+    observation.center_image = SimpleNamespace(
+        header=SimpleNamespace(stamp=_stamp(1_000_000_000))
+    )
+    settle = {
+        "position_error_m": 0.0,
+        "orientation_error_rad": 0.0,
+        "tracking_position_error_m": 0.0,
+        "tracking_orientation_error_rad": 0.0,
+        "command_position_delta_m": 0.0,
+        "command_orientation_delta_rad": 0.0,
+    }
+    saved_sample: dict = {}
+
+    monkeypatch.setattr(motion.dataset, "shift_origin", lambda transform, _offset: transform)
+    monkeypatch.setattr(
+        motion,
+        "_apply_sample",
+        lambda _policy, pose, _port_tf, _state, _index: (
+            pose,
+            {
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "z_m": 0.0,
+                "roll_rad": 0.0,
+                "pitch_rad": 0.0,
+                "yaw_rad": 0.0,
+                "tier_m": 0.050,
+                "distance_m": 0.020,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        motion,
+        "wait_for_pose_convergence",
+        lambda *_args, **_kwargs: (1_000_000_000, settle),
+    )
+    monkeypatch.setattr(
+        motion.dataset,
+        "wait_for_observation",
+        lambda *_args: (observation, {"capture_stamp_ns": 1_000_000_000}),
+    )
+    monkeypatch.setattr(
+        motion.dataset,
+        "image_for_camera",
+        lambda current, _camera: current.center_image,
+    )
+    monkeypatch.setattr(
+        motion.dataset,
+        "tf_sync",
+        lambda _policy, timestamps, *_args, **_kwargs: (True, timestamps),
+    )
+    monkeypatch.setattr(
+        motion.dataset,
+        "target_xyz",
+        lambda *_args: [0.0, 0.0, 0.015],
+    )
+
+    def save_sample(_policy, **kwargs):
+        saved_sample.update(kwargs["sample"])
+        return True, "sample"
+
+    monkeypatch.setattr(motion.dataset, "save_sample", save_sample)
+
+    context = {
+        "counts": {"collect": 0, "attempts": 0, "haptic_contacts": 0},
+        "port_snapshot": SimpleNamespace(transform=port_tf),
+        "cable_tip_frame": "plug",
+        "plug_offset": np.zeros(3),
+        "collect_stiffness": [1.0] * 6,
+        "collect_damping": [1.0] * 6,
+        "episode_name": "test",
+        "task": SimpleNamespace(),
+        "annotation_ports": (),
+    }
+
+    collected = motion.collect(policy, context, lambda: observation, None)
+
+    assert collected
+    assert context["counts"]["collect"] == 1
+    assert saved_sample["actual_view_distance_m"] == 0.015

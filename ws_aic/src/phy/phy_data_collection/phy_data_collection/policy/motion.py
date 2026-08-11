@@ -1082,19 +1082,6 @@ def collect(policy, context, get_observation, move_robot) -> bool:
             actual_view_distance_m = -float(
                 np.dot(np.asarray(label_xyz, dtype=float), state["port_axis"])
             )
-            if (
-                policy.collection_policy != "board-view"
-                and actual_view_distance_m < policy.base_z_offset
-            ):
-                policy.get_logger().error(
-                    policy.log_text(
-                        "[PortOffsetCollect] CAPTURE FAILED: actual TF clearance is below "
-                        f"{policy.base_z_offset * 1e3:g}mm; "
-                        f"actual={actual_view_distance_m * 1e3:.3f}mm",
-                        "red",
-                    )
-                )
-                continue
             sample["actual_xyz_m"] = sampling_offset_xyz
             sample["actual_view_distance_m"] = actual_view_distance_m
             saved, detail = dataset.save_sample(
