@@ -19,6 +19,8 @@ import yaml
 
 from .constants import (
     ANSI_COLORS,
+    ANNOTATION_ROBOT_DESCRIPTION_PATH,
+    BASE_ROS_GZ_BRIDGE_CONFIG_PATH,
     POLICY_PACKAGE_ROOT,
     DATASET_ROOT,
     EPISODE_TRACKING_DIR,
@@ -33,6 +35,7 @@ from .lifecycle import (
     wait_group_exit,
 )
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+DEPTH_CAMERAS = ("left", "center", "right")
 
 
 @dataclass
@@ -343,6 +346,9 @@ def _policy_environment(
     env["AIC_IMG2POS_AUTO_ANNOTATE_PORTS"] = (
         "true" if args.auto_annotate_ports else "false"
     )
+    env["AIC_IMG2POS_DEPTH_VISIBILITY"] = (
+        "true" if args.auto_annotate_ports else "false"
+    )
 
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MIN_MM", args.dx_min_mm)
     _set_optional_env(env, "AIC_PORT_COLLECT_DX_MAX_MM", args.dx_max_mm)
@@ -479,6 +485,14 @@ def start_gazebo(
         launch_args.append("gazebo_gui:=false")
     if args.headless or not args.launch_rviz:
         launch_args.append("launch_rviz:=false")
+    if args.auto_annotate_ports:
+        bridge_config = _write_annotation_bridge_config(config_path)
+        launch_args.extend(
+            [
+                f"description_file:={ANNOTATION_ROBOT_DESCRIPTION_PATH}",
+                f"ros_gz_bridge_config_file:={bridge_config}",
+            ]
+        )
 
     launch_cmd = shlex.join(
         ["ros2", "launch", "aic_bringup", "aic_gz_bringup.launch.py", *launch_args]
@@ -517,6 +531,42 @@ def start_gazebo(
     cmd = ["distrobox", "enter", args.distrobox, "--", "bash", "-lc", inner]
     print("[gazebo] " + shlex.join(cmd))
     return _start_logged_process(cmd, cwd=PIXI_WS)
+
+
+def _write_annotation_bridge_config(config_path: Path) -> Path:
+    """기존 bridge 설정에 수집용 depth image 세 topic을 추가한다."""
+    entries = yaml.safe_load(
+        BASE_ROS_GZ_BRIDGE_CONFIG_PATH.read_text(encoding="utf-8")
+    )
+    if not isinstance(entries, list):
+        raise ValueError(
+            f"invalid ROS-Gazebo bridge config: {BASE_ROS_GZ_BRIDGE_CONFIG_PATH}"
+        )
+    existing = {
+        str(entry.get("ros_topic_name", entry.get("topic_name", "")))
+        for entry in entries
+        if isinstance(entry, dict)
+    }
+    for camera in DEPTH_CAMERAS:
+        topic = f"/{camera}_camera/depth_image"
+        if topic in existing:
+            continue
+        entries.append(
+            {
+                "ros_topic_name": topic,
+                "gz_topic_name": topic,
+                "ros_type_name": "sensor_msgs/msg/Image",
+                "gz_type_name": "gz.msgs.Image",
+                "direction": "GZ_TO_ROS",
+                "lazy": True,
+            }
+        )
+    output_path = config_path.with_name(f"{config_path.stem}_bridge.yaml")
+    output_path.write_text(
+        yaml.safe_dump(entries, sort_keys=False),
+        encoding="utf-8",
+    )
+    return output_path
 
 
 def _project_hf_token() -> str | None:

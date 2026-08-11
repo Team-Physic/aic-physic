@@ -8,6 +8,7 @@ import re
 import signal
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +22,9 @@ from aic_model.policy import (
 from aic_task_interfaces.msg import Task
 from geometry_msgs.msg import Vector3, Wrench
 from rclpy.duration import Duration
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
+from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 from tf2_ros import TransformException
 
@@ -206,6 +209,33 @@ class PortOffsetCollect(Policy):
         self.auto_annotate_ports = _env_bool(
             "AIC_IMG2POS_AUTO_ANNOTATE_PORTS", False
         )
+        self.auto_annotation_visibility = (
+            self.auto_annotate_ports
+            and _env_bool("AIC_IMG2POS_DEPTH_VISIBILITY", False)
+        )
+        self.annotation_depth_timeout_s = max(
+            0.0,
+            _env_float(
+                "AIC_IMG2POS_ANNOTATION_DEPTH_TIMEOUT_SEC",
+                self.sync_wait_timeout_s,
+            ),
+        )
+        self._depth_condition = threading.Condition()
+        self._depth_buffers = {
+            camera: deque(maxlen=32) for camera in ("left", "center", "right")
+        }
+        self._depth_subscriptions = []
+        if self.auto_annotation_visibility:
+            for camera in self._depth_buffers:
+                subscription = parent_node.create_subscription(
+                    Image,
+                    f"/{camera}_camera/depth_image",
+                    lambda message, camera=camera: self._on_depth_image(
+                        camera, message
+                    ),
+                    qos_profile_sensor_data,
+                )
+                self._depth_subscriptions.append(subscription)
         self.capture_count = 0
         self.record = _env_bool("AIC_IMG2POS_RECORD", True)
         xy_limit = _env_float("AIC_PORT_COLLECT_XY_LIMIT_MM", 50.0) / 1000.0
@@ -255,8 +285,28 @@ class PortOffsetCollect(Policy):
         self.get_logger().info(
             f"[PortOffsetCollect] Ready: policy={self.collection_policy}, "
             f"steps={self.collect_steps}, "
-            f"dataset={self.dataset_dir}, split={self.trial_split or 'hash'}"
+            f"dataset={self.dataset_dir}, split={self.trial_split or 'hash'}, "
+            f"depth_visibility={self.auto_annotation_visibility}"
         )
+
+    def _on_depth_image(self, camera: str, message: Image) -> None:
+        """camera별 최근 depth frame을 보관하고 대기 중인 capture를 깨운다."""
+        with self._depth_condition:
+            self._depth_buffers[camera].append(message)
+            self._depth_condition.notify_all()
+
+    def depth_image_at(self, camera: str, capture_stamp_ns: int) -> Image | None:
+        """RGB capture stamp와 정확히 일치하는 depth frame을 제한 시간 동안 찾는다."""
+        deadline = time.monotonic() + self.annotation_depth_timeout_s
+        with self._depth_condition:
+            while True:
+                for message in reversed(self._depth_buffers[camera]):
+                    if dataset._stamp_ns(message.header.stamp) == capture_stamp_ns:
+                        return message
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return None
+                self._depth_condition.wait(remaining)
 
     def _watch_stop_file(self) -> None:
         """stop file이 생기면 policy 프로세스를 종료한다."""

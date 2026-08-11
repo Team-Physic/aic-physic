@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="$(arg name)">
+  <xacro:include filename="$(find aic_description)/urdf/ur_gz.urdf.xacro"/>
+
+  <!--
+    Project-only depth sensors for port visibility annotation.  The official
+    RGB sensors remain unchanged; these sensors share their optical geometry
+    and update rate so the policy can require matching acquisition stamps.
+  -->
+  <xacro:macro name="annotation_depth_camera" params="name tf_prefix">
+    <gazebo reference="${tf_prefix}sensor_link">
+      <sensor name="${name}_annotation_depth" type="depth_camera">
+        <pose>0 0 0 0 0 0</pose>
+        <update_rate>20.0</update_rate>
+        <topic>/${name}/depth_image</topic>
+        <always_on>true</always_on>
+        <frame_id>${tf_prefix}sensor_link</frame_id>
+        <camera name="${name}_annotation_depth">
+          <optical_frame_id>${tf_prefix}optical</optical_frame_id>
+          <image>
+            <width>1152</width>
+            <height>1024</height>
+            <format>R_FLOAT32</format>
+          </image>
+          <horizontal_fov>0.8718</horizontal_fov>
+          <clip>
+            <near>0.07</near>
+            <far>20</far>
+          </clip>
+        </camera>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:annotation_depth_camera name="left_camera" tf_prefix="left_camera/"/>
+  <xacro:annotation_depth_camera name="center_camera" tf_prefix="center_camera/"/>
+  <xacro:annotation_depth_camera name="right_camera" tf_prefix="right_camera/"/>
+</robot>

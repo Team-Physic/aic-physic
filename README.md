@@ -122,7 +122,8 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `AIC_IMG2POS_DATASET_DIR` | `ws_aic/data/img2pos[/<version>]` | 데이터셋 출력 위치 |
 | `AIC_IMG2POS_MIN_VISIBLE_CAMERAS` | `2` | 저장에 필요한 최소 카메라 수 |
 | `AIC_IMG2POS_AUTO_ANNOTATE_PORTS` | `false` | 활성 포트 bbox/4-keypoint YOLO-pose annotation 생성 |
-| `AIC_IMG2POS_VISIBILITY_MARGIN_PX` | `64.0` | 영상 경계로부터 필요한 여백 |
+| `AIC_IMG2POS_DEPTH_VISIBILITY` | runner 자동 설정 | RGB와 동일 stamp의 Gazebo depth로 keypoint visibility 판정 |
+| `AIC_IMG2POS_ANNOTATION_DEPTH_TIMEOUT_SEC` | sync 대기시간과 동일 | 일치하는 depth frame 대기시간 |
 | `AIC_COLLECT_SYNC_TOLERANCE_MS` | `30.0` | camera/controller/TF 허용 시각 차이 |
 | `AIC_IMG2POS_VAL_RATIO` | `0.15` | validation trial 비율 |
 | `AIC_IMG2POS_TEST_RATIO` | `0.15` | test trial 비율 |
@@ -163,7 +164,9 @@ Ultralytics가 기본 `labels/` 경로로도 읽을 수 있도록 symlink를 생
 keypoint 순서와 치수는
 [`phy_data_collection/README.md`](ws_aic/src/phy/phy_data_collection/README.md#데이터셋)를
 참고하십시오. SFP label은 0부터 세는 rail/port를 결합한 `SFP_<rail><port>`이며,
-예를 들어 rail 4의 port 1은 `SFP_41`입니다.
+예를 들어 rail 4의 port 1은 `SFP_41`입니다. 새 수집에서는 RGB와 동일 stamp의 Gazebo
+depth를 비교해 보이는 keypoint를 `2`, 가린 keypoint를 `1`로 기록합니다. 보이는 점이
+두 개 미만이면 bbox를 포함한 객체 행 전체를 제외합니다.
 
 저장 결과는 PyQt annotation editor로 확인하고 수정할 수 있습니다.
 

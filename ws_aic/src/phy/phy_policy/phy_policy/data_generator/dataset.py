@@ -26,6 +26,9 @@ ROBOT_ARM_OCCLUSION_REASON = "robot_arm_occlusion"
 ROBOT_ARM_DARK_THRESHOLD = 40
 ROBOT_ARM_MIN_AREA_RATIO = 0.01
 ROBOT_ARM_MASK_DILATION_PX = 8
+ANNOTATION_DEPTH_MARGIN_M = 0.002
+ANNOTATION_DEPTH_PATCH_RADIUS_PX = 2
+ANNOTATION_MIN_VISIBLE_KEYPOINTS = 2
 SFP_RAIL_COUNT = 5
 SFP_PORT_COUNT = 2
 SC_CLASS_ID = SFP_RAIL_COUNT * SFP_PORT_COUNT
@@ -224,7 +227,93 @@ def _port_outer_projection(
     )
 
 
-def _yolo_pose_row(class_id: int, projection: dict[str, Any]) -> str:
+def _depth_image_meters(message) -> np.ndarray:
+    """ROS depth Image의 32FC1/16UC1 buffer를 meter 단위 2D 배열로 변환한다."""
+    encoding = str(getattr(message, "encoding", "")).upper()
+    byte_order = ">" if bool(getattr(message, "is_bigendian", False)) else "<"
+    if encoding == "32FC1":
+        dtype = np.dtype(f"{byte_order}f4")
+        scale = 1.0
+    elif encoding in {"16UC1", "MONO16"}:
+        dtype = np.dtype(f"{byte_order}u2")
+        scale = 0.001
+    else:
+        raise ValueError(f"unsupported depth encoding: {encoding or 'empty'}")
+    height = int(message.height)
+    width = int(message.width)
+    step = int(message.step)
+    row_bytes = width * dtype.itemsize
+    if height <= 0 or width <= 0 or step < row_bytes:
+        raise ValueError(
+            f"invalid depth dimensions: width={width}, height={height}, step={step}"
+        )
+    buffer = memoryview(message.data)
+    if buffer.nbytes < step * height:
+        raise ValueError(
+            f"invalid depth buffer size: expected={step * height}, got={buffer.nbytes}"
+        )
+    image = np.ndarray(
+        shape=(height, width),
+        dtype=dtype,
+        buffer=buffer,
+        strides=(step, dtype.itemsize),
+    )
+    return image.astype(np.float32, copy=True) * scale
+
+
+def _depth_for_capture(policy, observation, camera: str) -> np.ndarray:
+    """RGB 촬영 stamp와 정확히 일치하는 camera depth frame을 반환한다."""
+    capture_stamp = _stamp_ns(image_for_camera(observation, camera).header.stamp)
+    provider = getattr(policy, "depth_image_at", None)
+    if capture_stamp is None or not callable(provider):
+        raise ValueError(f"{camera}: synchronized depth provider unavailable")
+    message = provider(camera, capture_stamp)
+    depth_stamp = _stamp_ns(getattr(getattr(message, "header", None), "stamp", None))
+    if message is None or depth_stamp != capture_stamp:
+        raise ValueError(
+            f"{camera}: depth frame missing for RGB stamp {capture_stamp}"
+        )
+    depth = _depth_image_meters(message)
+    rgb = image_for_camera(observation, camera)
+    if depth.shape != (int(rgb.height), int(rgb.width)):
+        raise ValueError(
+            f"{camera}: depth/RGB size mismatch: depth={depth.shape}, "
+            f"rgb={(int(rgb.height), int(rgb.width))}"
+        )
+    return depth
+
+
+def _keypoint_visibilities(
+    projection: dict[str, Any],
+    depth: np.ndarray,
+) -> tuple[int, ...]:
+    """투영 깊이보다 앞선 surface가 있는 keypoint를 가림(1)으로 판정한다."""
+    height, width = depth.shape
+    visibilities = []
+    radius = ANNOTATION_DEPTH_PATCH_RADIUS_PX
+    for point in projection["points"]:
+        u = int(np.clip(round(float(point["u_px"])), 0, width - 1))
+        v = int(np.clip(round(float(point["v_px"])), 0, height - 1))
+        patch = depth[
+            max(0, v - radius) : min(height, v + radius + 1),
+            max(0, u - radius) : min(width, u + radius + 1),
+        ]
+        valid = patch[np.isfinite(patch) & (patch > 0.0)]
+        if valid.size == 0:
+            visibilities.append(2)
+            continue
+        observed_depth = float(np.median(valid))
+        expected_depth = float(point["depth_m"])
+        occluded = observed_depth + ANNOTATION_DEPTH_MARGIN_M < expected_depth
+        visibilities.append(1 if occluded else 2)
+    return tuple(visibilities)
+
+
+def _yolo_pose_row(
+    class_id: int,
+    projection: dict[str, Any],
+    visibilities: tuple[int, ...] | None = None,
+) -> str:
     """외곽 투영점에서 정규화 bbox와 4-keypoint YOLO pose row를 만든다."""
     width, height = projection["image_size_px"]
     points = projection["points"]
@@ -239,8 +328,15 @@ def _yolo_pose_row(class_id: int, projection: dict[str, Any]) -> str:
         y_max - y_min,
     ]
     values = [f"{value:.9f}" for value in bbox]
-    for x, y in zip(xs, ys):
-        values.extend((f"{x:.9f}", f"{y:.9f}", "2"))
+    if visibilities is None:
+        visibilities = (2,) * len(points)
+    if len(visibilities) != len(points):
+        raise ValueError(
+            f"visibility count mismatch: points={len(points)}, "
+            f"visibilities={len(visibilities)}"
+        )
+    for x, y, visibility in zip(xs, ys, visibilities):
+        values.extend((f"{x:.9f}", f"{y:.9f}", str(int(visibility))))
     return " ".join([str(int(class_id)), *values])
 
 
@@ -258,10 +354,27 @@ def _annotation_rows_by_camera(
     rows = {camera: [] for camera in ("left", "center", "right")}
     labels = {camera: [] for camera in rows}
     for camera in rows:
+        depth_visibility = bool(
+            getattr(policy, "auto_annotation_visibility", False)
+        )
+        depth = (
+            _depth_for_capture(policy, observation, camera)
+            if depth_visibility
+            else None
+        )
         for port in annotation_ports:
             projection = _port_outer_projection(policy, observation, camera, port)
             if projection.get("visible", False):
-                rows[camera].append(_yolo_pose_row(port["class_id"], projection))
+                visibilities = (
+                    _keypoint_visibilities(projection, depth)
+                    if depth is not None
+                    else (2,) * len(projection["points"])
+                )
+                if visibilities.count(2) < ANNOTATION_MIN_VISIBLE_KEYPOINTS:
+                    continue
+                rows[camera].append(
+                    _yolo_pose_row(port["class_id"], projection, visibilities)
+                )
                 labels[camera].append(port["label"])
     return rows, labels
 
@@ -635,6 +748,9 @@ def write_manifest(policy) -> None:
             + "]"
         )
     auto_annotate_ports = bool(getattr(policy, "auto_annotate_ports", False))
+    depth_visibility = bool(
+        getattr(policy, "auto_annotation_visibility", False)
+    )
     annotations = ["annotations:", f"  enabled: {str(auto_annotate_ports).lower()}"]
     if auto_annotate_ports:
         annotations.extend(
@@ -647,9 +763,17 @@ def write_manifest(policy) -> None:
                 "  port_outer_size_mm: {sfp: [16.224, 13.698], sc: [25.781, 9.300]}",
             ]
         )
+        if depth_visibility:
+            annotations.extend(
+                [
+                    "  visibility_source: synchronized_depth",
+                    f"  minimum_visible_keypoints: {ANNOTATION_MIN_VISIBLE_KEYPOINTS}",
+                    f"  occlusion_margin_m: {ANNOTATION_DEPTH_MARGIN_M:g}",
+                ]
+            )
     content = "\n".join(
         [
-            "schema_version: 6",
+            f"schema_version: {7 if depth_visibility else 6}",
             "task: img2pos",
             f"version: {policy.dataset_version or 'default'}",
             "sample_unit: synchronized_capture",

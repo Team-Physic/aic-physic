@@ -17,6 +17,12 @@ CONFIG_DIR = Path("/tmp/phy_portoffset_randomization")
 WORLD_TEMPLATE_PATH = (
     ROOT / "ws_aic" / "src" / "aic" / "aic_description" / "world" / "aic.sdf"
 )
+ANNOTATION_ROBOT_DESCRIPTION_PATH = (
+    WS_SRC / "phy" / "phy_data_collection" / "config" / "ur_gz_depth.urdf.xacro"
+)
+BASE_ROS_GZ_BRIDGE_CONFIG_PATH = (
+    WS_SRC / "aic" / "aic_bringup" / "config" / "ros_gz_bridge_config.yaml"
+)
 EPISODE_TRACKING_DIR = Path("/tmp/aic_episodes")
 
 COLLECTION_POLICY_MODULES = {
@@ -42,8 +48,11 @@ ROSBAG_TOPICS = (
     "/aic_controller/controller_state",
     "/aic_controller/pose_commands",
     "/left_camera/image",
+    "/left_camera/depth_image",
     "/center_camera/image",
+    "/center_camera/depth_image",
     "/right_camera/image",
+    "/right_camera/depth_image",
 )
 
 CLI_DEFAULTS = {

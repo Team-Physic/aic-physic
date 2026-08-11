@@ -76,7 +76,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--dataset-version` | 자동 생성 | `ws_aic/data/img2pos/` 아래 새 version 경로 |
 | `--resume` | 꺼짐 | 기존 version에 명시적으로 이어서 수집 |
 | `--val-ratio`, `--test-ratio` | `0.15`, `0.15` | trial 단위 validation/test 비율 |
-| `--auto-annotate-ports {true,false}` | `false` | 활성 포트의 외곽 bbox와 4-keypoint YOLO-pose annotation 생성 |
+| `--auto-annotate-ports {true,false}` | `false` | 활성 포트의 bbox·4-keypoint와 synchronized depth 기반 visibility 생성 |
 | `--headless`, `--no-headless` | `--headless` | Gazebo GUI 비활성화/활성화; `workers=1`일 때만 `--no-headless`가 적용됨 |
 | `--launch-rviz {true,false}` | `false` | RViz 실행 여부; headless 또는 병렬 실행이면 항상 꺼짐 |
 | `--distrobox` | `aic_eval_physic` | eval container 이름 |
@@ -340,8 +340,20 @@ class ID는 `rail×2+port`이고 `yolo_pose.yaml`의 이름은 `SFP_00`부터 `S
 `10`, label `sc_port`를 사용합니다. keypoint는 port entrance 로컬 좌표의
 `(-x,+y), (+x,+y), (+x,-y), (-x,-y)` 순서입니다. bbox는 이 네 외곽점의 min/max이며,
 사용 크기는 SFP `16.224×13.698mm`, SC `25.781×9.300mm`입니다. 네 점이 모두 영상 안에
-있는 포트만 한 행으로 기록하고 포트가 없는 camera도 빈 TXT를 남깁니다. 이 판정은
-geometry projection이므로 다른 물체에 의한 실제 가림까지 판정하지는 않습니다.
+있는 포트만 검사하고 포트가 없는 camera도 빈 TXT를 남깁니다.
+
+annotation을 활성화하면 runner가 기존 RGB와 pose·FOV·해상도·주기가 같은 Gazebo depth
+sensor를 함께 띄웁니다. policy는 RGB와 capture stamp가 정확히 일치하는 depth frame만
+사용하며, keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(`v=1`),
+그렇지 않으면 보임(`v=2`)으로 기록합니다. `5×5px` 주변 깊이의 median으로 rasterized
+edge 오차를 줄입니다. `v=2` keypoint가 두 개 미만이면 bbox를 포함한 해당 YOLO Pose
+행 전체를 저장하지 않습니다. 즉 `0~1`점만 보이는 객체는 제외되고 `2~4`점이 보이는
+객체만 유지됩니다. depth frame이 없거나 RGB stamp·해상도와 다르면 해당 sample 저장을
+실패시켜 visibility가 모두 `2`인 annotation으로 조용히 대체하지 않습니다.
+
+기존 geometry-only annotation과 depth visibility annotation을 한 version에 섞지 않도록,
+이 기능 적용 후에는 새 `--dataset-version`을 사용하는 것을 권장합니다. 기존 RGB
+데이터를 유지해야 하면 annotation editor의 후처리 결과를 별도로 검증한 뒤 저장합니다.
 
 `metadata.jsonl`은 수집 실행마다 한 row를 추가합니다.
 
