@@ -228,6 +228,13 @@ class PortOffsetCollect(Policy):
                 self.sync_wait_timeout_s,
             ),
         )
+        self.annotation_depth_max_skew_ns = int(
+            max(
+                0.0,
+                _env_float("AIC_IMG2POS_ANNOTATION_DEPTH_MAX_SKEW_SEC", 0.25),
+            )
+            * 1_000_000_000
+        )
         self._depth_condition = threading.Condition()
         self._depth_buffers = {
             camera: deque(maxlen=32) for camera in ("left", "center", "right")
@@ -304,16 +311,28 @@ class PortOffsetCollect(Policy):
             self._depth_condition.notify_all()
 
     def depth_image_at(self, camera: str, capture_stamp_ns: int) -> Image | None:
-        """RGB capture stamp와 정확히 일치하는 depth frame을 제한 시간 동안 찾는다."""
+        """RGB와 가장 가까운 허용 범위의 depth frame을 제한 시간 동안 찾는다."""
         deadline = time.monotonic() + self.annotation_depth_timeout_s
         with self._depth_condition:
             while True:
-                for message in reversed(self._depth_buffers[camera]):
-                    if dataset._stamp_ns(message.header.stamp) == capture_stamp_ns:
-                        return message
+                stamped = [
+                    (dataset._stamp_ns(message.header.stamp), message)
+                    for message in self._depth_buffers[camera]
+                ]
+                stamped = [(stamp, message) for stamp, message in stamped if stamp is not None]
+                candidates = [
+                    (abs(stamp - capture_stamp_ns), message)
+                    for stamp, message in stamped
+                    if abs(stamp - capture_stamp_ns)
+                    <= self.annotation_depth_max_skew_ns
+                ]
+                if candidates and any(
+                    stamp >= capture_stamp_ns for stamp, _message in stamped
+                ):
+                    return min(candidates, key=lambda item: item[0])[1]
                 remaining = deadline - time.monotonic()
                 if remaining <= 0.0:
-                    return None
+                    return min(candidates, key=lambda item: item[0])[1] if candidates else None
                 self._depth_condition.wait(remaining)
 
     def _watch_stop_file(self) -> None:

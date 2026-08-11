@@ -29,6 +29,8 @@ ROBOT_ARM_MASK_DILATION_PX = 8
 ANNOTATION_DEPTH_MARGIN_M = 0.002
 ANNOTATION_DEPTH_PATCH_RADIUS_PX = 2
 ANNOTATION_MIN_VISIBLE_KEYPOINTS = 2
+ANNOTATION_DEPTH_IMAGE_SIZE_PX = (576, 512)
+ANNOTATION_DEPTH_UPDATE_RATE_HZ = 5.0
 SFP_RAIL_COUNT = 5
 SFP_PORT_COUNT = 2
 SC_CLASS_ID = SFP_RAIL_COUNT * SFP_PORT_COUNT
@@ -262,22 +264,28 @@ def _depth_image_meters(message) -> np.ndarray:
 
 
 def _depth_for_capture(policy, observation, camera: str) -> np.ndarray:
-    """RGB 촬영 stamp와 정확히 일치하는 camera depth frame을 반환한다."""
+    """RGB 촬영 stamp와 허용 오차 안에서 가장 가까운 depth frame을 반환한다."""
     capture_stamp = _stamp_ns(image_for_camera(observation, camera).header.stamp)
     provider = getattr(policy, "depth_image_at", None)
     if capture_stamp is None or not callable(provider):
         raise ValueError(f"{camera}: synchronized depth provider unavailable")
     message = provider(camera, capture_stamp)
     depth_stamp = _stamp_ns(getattr(getattr(message, "header", None), "stamp", None))
-    if message is None or depth_stamp != capture_stamp:
+    max_skew_ns = int(getattr(policy, "annotation_depth_max_skew_ns", 0))
+    if (
+        message is None
+        or depth_stamp is None
+        or abs(depth_stamp - capture_stamp) > max_skew_ns
+    ):
         raise ValueError(
-            f"{camera}: depth frame missing for RGB stamp {capture_stamp}"
+            f"{camera}: depth frame missing within {max_skew_ns}ns of "
+            f"RGB stamp {capture_stamp}"
         )
     depth = _depth_image_meters(message)
     rgb = image_for_camera(observation, camera)
-    if depth.shape != (int(rgb.height), int(rgb.width)):
+    if depth.shape[0] * int(rgb.width) != depth.shape[1] * int(rgb.height):
         raise ValueError(
-            f"{camera}: depth/RGB size mismatch: depth={depth.shape}, "
+            f"{camera}: depth/RGB aspect ratio mismatch: depth={depth.shape}, "
             f"rgb={(int(rgb.height), int(rgb.width))}"
         )
     return depth
@@ -289,11 +297,29 @@ def _keypoint_visibilities(
 ) -> tuple[int, ...]:
     """투영 깊이보다 앞선 surface가 있는 keypoint를 가림(1)으로 판정한다."""
     height, width = depth.shape
+    rgb_width, rgb_height = projection["image_size_px"]
+    scale_x = width / float(rgb_width)
+    scale_y = height / float(rgb_height)
     visibilities = []
-    radius = ANNOTATION_DEPTH_PATCH_RADIUS_PX
+    radius = max(
+        1,
+        round(ANNOTATION_DEPTH_PATCH_RADIUS_PX * min(scale_x, scale_y)),
+    )
     for point in projection["points"]:
-        u = int(np.clip(round(float(point["u_px"])), 0, width - 1))
-        v = int(np.clip(round(float(point["v_px"])), 0, height - 1))
+        u = int(
+            np.clip(
+                round((float(point["u_px"]) + 0.5) * scale_x - 0.5),
+                0,
+                width - 1,
+            )
+        )
+        v = int(
+            np.clip(
+                round((float(point["v_px"]) + 0.5) * scale_y - 0.5),
+                0,
+                height - 1,
+            )
+        )
         patch = depth[
             max(0, v - radius) : min(height, v + radius + 1),
             max(0, u - radius) : min(width, u + radius + 1),
@@ -767,13 +793,18 @@ def write_manifest(policy) -> None:
             annotations.extend(
                 [
                     "  visibility_source: synchronized_depth",
+                    "  depth_image_size_px: "
+                    f"[{ANNOTATION_DEPTH_IMAGE_SIZE_PX[0]}, {ANNOTATION_DEPTH_IMAGE_SIZE_PX[1]}]",
+                    f"  depth_update_rate_hz: {ANNOTATION_DEPTH_UPDATE_RATE_HZ:g}",
+                    "  max_depth_rgb_skew_ms: "
+                    f"{policy.annotation_depth_max_skew_ns / 1e6:g}",
                     f"  minimum_visible_keypoints: {ANNOTATION_MIN_VISIBLE_KEYPOINTS}",
                     f"  occlusion_margin_m: {ANNOTATION_DEPTH_MARGIN_M:g}",
                 ]
             )
     content = "\n".join(
         [
-            f"schema_version: {7 if depth_visibility else 6}",
+            f"schema_version: {8 if depth_visibility else 6}",
             "task: img2pos",
             f"version: {policy.dataset_version or 'default'}",
             "sample_unit: synchronized_capture",

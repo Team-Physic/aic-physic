@@ -360,14 +360,15 @@ class ID는 `rail×2+port`이고 `yolo_pose.yaml`의 이름은 `SFP_00`부터 `S
 사용 크기는 SFP `16.224×13.698mm`, SC `25.781×9.300mm`입니다. 네 점이 모두 영상 안에
 있는 포트만 검사하고 포트가 없는 camera도 빈 TXT를 남깁니다.
 
-annotation을 활성화하면 runner가 기존 RGB와 pose·FOV·해상도·주기가 같은 Gazebo depth
-sensor를 함께 띄웁니다. policy는 RGB와 capture stamp가 정확히 일치하는 depth frame만
-사용하며, keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(`v=1`),
-그렇지 않으면 보임(`v=2`)으로 기록합니다. `5×5px` 주변 깊이의 median으로 rasterized
-edge 오차를 줄입니다. `v=2` keypoint가 두 개 미만이면 bbox를 포함한 해당 YOLO Pose
-행 전체를 저장하지 않습니다. 즉 `0~1`점만 보이는 객체는 제외되고 `2~4`점이 보이는
-객체만 유지됩니다. depth frame이 없거나 RGB stamp·해상도와 다르면 해당 sample 저장을
-실패시켜 visibility가 모두 `2`인 annotation으로 조용히 대체하지 않습니다.
+annotation을 활성화하면 runner가 기존 RGB와 pose·FOV가 같은 `576×512`, `5Hz` Gazebo
+depth sensor를 함께 띄웁니다. policy는 정지 완료 후 RGB 촬영 시각에서 `250ms` 이내인
+가장 가까운 depth frame을 사용하고, RGB keypoint를 depth 해상도로 비례 변환합니다.
+keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(`v=1`), 그렇지 않으면
+보임(`v=2`)으로 기록합니다. depth 기준 `3×3px` 주변 깊이의 median으로 rasterized edge
+오차를 줄입니다. `v=2` keypoint가 두 개 미만이면 bbox를 포함한 해당 YOLO Pose 행 전체를
+저장하지 않습니다. 즉 `0~1`점만 보이는 객체는 제외되고 `2~4`점이 보이는 객체만
+유지됩니다. 허용 시차 안의 depth frame이 없거나 RGB와 종횡비가 다르면 해당 sample
+저장을 실패시켜 visibility가 모두 `2`인 annotation으로 조용히 대체하지 않습니다.
 
 기존 geometry-only annotation과 depth visibility annotation을 한 version에 섞지 않도록,
 이 기능 적용 후에는 새 `--dataset-version`을 사용하는 것을 권장합니다. 기존 RGB
