@@ -31,7 +31,8 @@ ENGINE_SETUP = "/ws_aic/install/setup.bash"
 RUN_MARKER_ENV = "AIC_PORTOFFSET_RUN_ID"
 REGISTRY_FILENAME = "owned_process_groups.json"
 TRIAL_TIMEOUT_GRACE_S = 180.0
-MIN_CLEARANCE_MM = 20.0
+MIN_CLEARANCE_MM = 1.0
+DESCENT_MIN_CLEARANCE_MM = 20.0
 
 BOOLEAN_METAVAR = "{true,false}"
 ROSBAG_TOPICS = (
@@ -103,7 +104,9 @@ CLI_DEFAULTS = {
     "yaw_min_rad": None,
     "yaw_max_rad": None,
     "rpy_norm_max_rad": None,
-    "base_z_offset_mm": MIN_CLEARANCE_MM,
+    "base_z_offset_mm": DESCENT_MIN_CLEARANCE_MM,
+    "near_port_base_z_offset_mm": MIN_CLEARANCE_MM,
+    "near_port_min_capture_clearance_mm": MIN_CLEARANCE_MM,
     "board_distance_min_mm": 750.0,
     "board_distance_max_mm": 850.0,
     "board_lateral_limit_mm": 30.0,

@@ -1283,13 +1283,22 @@ class BoundingBoxViewer(QMainWindow):
         if entry is None:
             return
         try:
-            result = apply_auto_visibility(entry.image_path, self.canvas.annotations)
+            preserve_fully_occluded = bool(
+                self.dataset is not None
+                and self.dataset.collection_policy == "near-port"
+            )
+            result = apply_auto_visibility(
+                entry.image_path,
+                self.canvas.annotations,
+                preserve_fully_occluded=preserve_fully_occluded,
+            )
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Auto visibility failed", str(exc))
             return
         self.canvas.set_annotations(result.annotations)
         self._show_status(
             f"Auto visibility: deleted={result.deleted_objects}, "
+            f"preserved fully occluded={result.preserved_occluded_objects}, "
             f"occluded keypoints={result.occluded_keypoints}"
         )
 

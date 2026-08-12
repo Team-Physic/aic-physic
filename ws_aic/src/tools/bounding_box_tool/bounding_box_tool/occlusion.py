@@ -22,6 +22,7 @@ class VisibilityResult:
 
     annotations: tuple[PoseAnnotation, ...]
     deleted_objects: int
+    preserved_occluded_objects: int
     occluded_keypoints: int
     mask_pixels: int
 
@@ -95,8 +96,9 @@ def apply_auto_visibility(
     annotations: tuple[PoseAnnotation, ...],
     *,
     full_occlusion_ratio: float = FULL_OCCLUSION_RATIO,
+    preserve_fully_occluded: bool = False,
 ) -> VisibilityResult:
-    """완전 가림 객체는 제거하고 부분 가림 keypoint는 visibility=1로 바꾼다."""
+    """RGB robot mask로 keypoint visibility와 완전 가림 객체를 갱신한다."""
     image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError(f"cannot read image: {image_path}")
@@ -104,21 +106,36 @@ def apply_auto_visibility(
     height, width = mask.shape
     updated = []
     deleted_objects = 0
+    preserved_occluded_objects = 0
     occluded_keypoints = 0
     for annotation in annotations:
         if _occlusion_ratio(mask, annotation) >= full_occlusion_ratio:
+            if preserve_fully_occluded:
+                keypoints = tuple(
+                    (x, y, 1) for x, y, _visibility in annotation.keypoints
+                )
+                occluded_keypoints += len(keypoints)
+                preserved_occluded_objects += 1
+                updated.append(replace(annotation, keypoints=keypoints))
+                continue
             deleted_objects += 1
             continue
         keypoints = []
-        for x, y, _visibility in annotation.keypoints:
+        for x, y, old_visibility in annotation.keypoints:
             pixel_x, pixel_y = _pixel_point(x, y, width, height)
-            visibility = 1 if mask[pixel_y, pixel_x] else 2
+            visibility = (
+                1
+                if mask[pixel_y, pixel_x]
+                or (preserve_fully_occluded and old_visibility == 1)
+                else 2
+            )
             occluded_keypoints += int(visibility == 1)
             keypoints.append((x, y, visibility))
         updated.append(replace(annotation, keypoints=tuple(keypoints)))
     return VisibilityResult(
         annotations=tuple(updated),
         deleted_objects=deleted_objects,
+        preserved_occluded_objects=preserved_occluded_objects,
         occluded_keypoints=occluded_keypoints,
         mask_pixels=int(np.count_nonzero(mask)),
     )

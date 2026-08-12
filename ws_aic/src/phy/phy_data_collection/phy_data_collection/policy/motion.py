@@ -47,7 +47,9 @@ LIFT_STEPS = _env_int("AIC_DISTANCE_INITIAL_LIFT_STEPS", 40)
 LIFT_DT = _env_float("AIC_DISTANCE_INITIAL_LIFT_DT", 0.05)
 LIFT_SETTLE_S = _env_float("AIC_DISTANCE_INITIAL_LIFT_SETTLE_S", 0.50)
 APPROACH_Z_M = _env_float("AIC_APPROACH_NEAR_Z_OFFSET_M", 0.020)
-MIN_CLEARANCE_M = 0.020
+MIN_CLEARANCE_M = 0.001
+DEFAULT_BASE_Z_OFFSET_M = 0.020
+NEAR_PORT_BASE_Z_OFFSET_M = 0.001
 APPROACH_STEPS = _env_int("AIC_APPROACH_STEPS", 80)
 APPROACH_DT = _env_float("AIC_APPROACH_DT", 0.05)
 APPROACH_SETTLE_S = _env_float("AIC_APPROACH_SETTLE_S", 0.50)
@@ -1104,6 +1106,36 @@ def collect(policy, context, get_observation, move_robot) -> bool:
             actual_view_distance_m = -float(
                 np.dot(np.asarray(label_xyz, dtype=float), state["port_axis"])
             )
+            if (
+                policy.collection_policy == "near-port"
+                and (
+                    not np.isfinite(actual_view_distance_m)
+                    or actual_view_distance_m + 1e-12
+                    < policy.min_capture_clearance
+                )
+            ):
+                context["counts"]["clearance_rejections"] += 1
+                policy.get_logger().info(
+                    policy.log_text(
+                        "[PortOffsetCollect] WAYPOINT SKIPPED: actual port "
+                        f"clearance={actual_view_distance_m * 1000.0:+.3f}mm "
+                        "is below minimum="
+                        f"{policy.min_capture_clearance * 1000.0:.3f}mm",
+                        "cyan",
+                    )
+                )
+                retreat_to_pose(
+                    policy,
+                    get_observation,
+                    move_robot,
+                    start,
+                    context["collect_stiffness"],
+                    context["collect_damping"],
+                )
+                waypoint_index += 1
+                sample_attempts = 0
+                policy.sleep_for(policy.step_sleep_s)
+                continue
             sample["actual_xyz_m"] = sampling_offset_xyz
             sample["actual_view_distance_m"] = actual_view_distance_m
             saved, detail = dataset.save_sample(

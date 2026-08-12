@@ -29,7 +29,9 @@ ROBOT_ARM_MIN_AREA_RATIO = 0.01
 ROBOT_ARM_MASK_DILATION_PX = 8
 ANNOTATION_DEPTH_MARGIN_M = 0.002
 ANNOTATION_DEPTH_PATCH_RADIUS_PX = 2
+ANNOTATION_DEPTH_NEAR_QUANTILE = 0.2
 ANNOTATION_MIN_VISIBLE_KEYPOINTS = 2
+ANNOTATION_PRESERVE_OCCLUDED_POLICIES = frozenset({"near-port"})
 ANNOTATION_DEPTH_IMAGE_SIZE_PX = (576, 512)
 ANNOTATION_DEPTH_UPDATE_RATE_HZ = 5.0
 SFP_RAIL_COUNT = 5
@@ -48,11 +50,13 @@ PORT_OUTER_SIZE_M = {
     "sc": (0.025781, 0.009300),
 }
 POSE_RECONSTRUCTION_ATOL = 1e-9
-DATASET_SCHEMA_VERSION = 10
+DATASET_SCHEMA_VERSION = 12
 TRIAL_CONSTANT_TRANSLATION_ATOL_M = 1e-5
 TRIAL_CONSTANT_ROTATION_ATOL_RAD = 1e-4
 CONNECTOR_CONSTANT_TRANSLATION_ATOL_M = 1e-9
 CONNECTOR_CONSTANT_ROTATION_ATOL_RAD = 1e-9
+CAMERA_CALIBRATION_PIXEL_ATOL = 1e-3
+CAMERA_CALIBRATION_MATRIX_ATOL = 1e-9
 
 
 def _transform_message_matrix(transform: Transform) -> np.ndarray:
@@ -376,8 +380,9 @@ def _depth_for_capture(policy, observation, camera: str) -> np.ndarray:
 def _keypoint_visibilities(
     projection: dict[str, Any],
     depth: np.ndarray,
+    occlusion_mask: np.ndarray | None = None,
 ) -> tuple[int, ...]:
-    """투영 깊이보다 앞선 surface가 있는 keypoint를 가림(1)으로 판정한다."""
+    """depth 또는 RGB robot mask가 앞을 가린 keypoint를 가림(1)으로 판정한다."""
     height, width = depth.shape
     rgb_width, rgb_height = projection["image_size_px"]
     scale_x = width / float(rgb_width)
@@ -388,6 +393,15 @@ def _keypoint_visibilities(
         round(ANNOTATION_DEPTH_PATCH_RADIUS_PX * min(scale_x, scale_y)),
     )
     for point in projection["points"]:
+        rgb_u = int(
+            np.clip(round(float(point["u_px"])), 0, int(rgb_width) - 1)
+        )
+        rgb_v = int(
+            np.clip(round(float(point["v_px"])), 0, int(rgb_height) - 1)
+        )
+        mask_occluded = bool(
+            occlusion_mask is not None and occlusion_mask[rgb_v, rgb_u]
+        )
         u = int(
             np.clip(
                 round((float(point["u_px"]) + 0.5) * scale_x - 0.5),
@@ -408,11 +422,16 @@ def _keypoint_visibilities(
         ]
         valid = patch[np.isfinite(patch) & (patch > 0.0)]
         if valid.size == 0:
-            visibilities.append(2)
+            visibilities.append(1 if mask_occluded else 2)
             continue
-        observed_depth = float(np.median(valid))
+        observed_depth = float(
+            np.quantile(valid, ANNOTATION_DEPTH_NEAR_QUANTILE)
+        )
         expected_depth = float(point["depth_m"])
-        occluded = observed_depth + ANNOTATION_DEPTH_MARGIN_M < expected_depth
+        occluded = (
+            mask_occluded
+            or observed_depth + ANNOTATION_DEPTH_MARGIN_M < expected_depth
+        )
         visibilities.append(1 if occluded else 2)
     return tuple(visibilities)
 
@@ -461,6 +480,10 @@ def _annotation_rows_by_camera(
     """camera별로 화면 안에 완전히 투영된 모든 port의 YOLO pose row를 만든다."""
     rows = {camera: [] for camera in ("left", "center", "right")}
     labels = {camera: [] for camera in rows}
+    preserve_occluded = (
+        str(getattr(policy, "collection_policy", ""))
+        in ANNOTATION_PRESERVE_OCCLUDED_POLICIES
+    )
     for camera in rows:
         depth_visibility = bool(
             getattr(policy, "auto_annotation_visibility", False)
@@ -470,15 +493,28 @@ def _annotation_rows_by_camera(
             if depth_visibility
             else None
         )
+        occlusion_mask = None
+        if depth_visibility and preserve_occluded:
+            image = image_to_bgr(policy, image_for_camera(observation, camera), camera)
+            if image is None:
+                raise ValueError(f"{camera}: RGB robot-arm mask image unavailable")
+            occlusion_mask = _robot_arm_mask(image)
         for port in annotation_ports:
             projection = _port_outer_projection(policy, observation, camera, port)
             if projection.get("visible", False):
                 visibilities = (
-                    _keypoint_visibilities(projection, depth)
+                    _keypoint_visibilities(
+                        projection,
+                        depth,
+                        occlusion_mask=occlusion_mask,
+                    )
                     if depth is not None
                     else (2,) * len(projection["points"])
                 )
-                if visibilities.count(2) < ANNOTATION_MIN_VISIBLE_KEYPOINTS:
+                if (
+                    not preserve_occluded
+                    and visibilities.count(2) < ANNOTATION_MIN_VISIBLE_KEYPOINTS
+                ):
                     continue
                 rows[camera].append(
                     _yolo_pose_row(port["class_id"], projection, visibilities)
@@ -875,6 +911,10 @@ def _dataset_constants_candidate(policy, observation) -> dict[str, Any]:
             ),
             "trial_translation_tolerance_m": TRIAL_CONSTANT_TRANSLATION_ATOL_M,
             "trial_rotation_tolerance_rad": TRIAL_CONSTANT_ROTATION_ATOL_RAD,
+            "trial_port_pose_only": True,
+            "tcp_plug_mode": "nominal_plus_residual",
+            "camera_calibration_pixel_atol": CAMERA_CALIBRATION_PIXEL_ATOL,
+            "camera_calibration_matrix_atol": CAMERA_CALIBRATION_MATRIX_ATOL,
         },
         "static_transforms": {
             "tool0_T_tcp": se3.pose_record(policy._tool0_tcp),
@@ -905,11 +945,63 @@ def _transform_error(
     )
 
 
+def _verify_camera_calibration(
+    existing: dict[str, Any],
+    candidate: dict[str, Any],
+) -> None:
+    """RGB/depth CameraInfo의 미세 차이를 허용하며 calibration을 검증한다."""
+    if set(existing) != set(candidate):
+        raise ValueError("dataset constant mismatch: camera_calibration cameras")
+
+    exact_keys = {
+        "frame_id",
+        "image_size_px",
+        "distortion_model",
+        "binning",
+        "roi",
+    }
+    matrix_tolerances = {
+        "D": CAMERA_CALIBRATION_MATRIX_ATOL,
+        "K": CAMERA_CALIBRATION_PIXEL_ATOL,
+        "R": CAMERA_CALIBRATION_MATRIX_ATOL,
+        "P": CAMERA_CALIBRATION_PIXEL_ATOL,
+    }
+    for camera in sorted(existing):
+        reference = existing[camera]
+        actual = candidate[camera]
+        for key in exact_keys:
+            if reference.get(key) != actual.get(key):
+                raise ValueError(
+                    "dataset constant mismatch: camera_calibration "
+                    f"{camera}.{key}"
+                )
+        for key, tolerance in matrix_tolerances.items():
+            reference_values = np.asarray(reference.get(key, ()), dtype=float)
+            actual_values = np.asarray(actual.get(key, ()), dtype=float)
+            if reference_values.shape != actual_values.shape:
+                raise ValueError(
+                    "dataset constant mismatch: camera_calibration "
+                    f"{camera}.{key} shape"
+                )
+            if not np.allclose(
+                reference_values,
+                actual_values,
+                rtol=0.0,
+                atol=tolerance,
+            ):
+                max_error = float(np.max(np.abs(reference_values - actual_values)))
+                raise ValueError(
+                    "dataset constant mismatch: camera_calibration "
+                    f"{camera}.{key} max_abs_error={max_error:.3e} "
+                    f"tolerance={tolerance:.3e}"
+                )
+
+
 def _verify_same_constants(
     existing: dict[str, Any],
     candidate: dict[str, Any],
 ) -> None:
-    """worker마다 관측한 dataset 공통 상수가 완전히 같은지 검사한다."""
+    """worker마다 관측한 dataset 공통 상수를 허용 오차 내에서 검사한다."""
     for key in (
         "schema_version",
         "pose_convention",
@@ -917,10 +1009,13 @@ def _verify_same_constants(
         "se3",
         "constant_validation",
         "static_transforms",
-        "camera_calibration",
     ):
         if existing.get(key) != candidate.get(key):
             raise ValueError(f"dataset constant mismatch: {key}")
+    _verify_camera_calibration(
+        existing.get("camera_calibration", {}),
+        candidate.get("camera_calibration", {}),
+    )
 
 
 def _ensure_dataset_constants(
@@ -1051,13 +1146,13 @@ def _ensure_trial_record(
     tcp_translation_error, tcp_rotation_error, tcp_delta = _transform_error(
         nominal_tcp_plug, tcp_plug_reference
     )
-    if max(port_translation_error, tcp_translation_error) > TRIAL_CONSTANT_TRANSLATION_ATOL_M:
+    if port_translation_error > TRIAL_CONSTANT_TRANSLATION_ATOL_M:
         raise ValueError(
             "trial translation constant drift: "
             f"port={port_translation_error:.3e}m, "
             f"tcp_plug={tcp_translation_error:.3e}m"
         )
-    if max(port_rotation_error, tcp_rotation_error) > TRIAL_CONSTANT_ROTATION_ATOL_RAD:
+    if port_rotation_error > TRIAL_CONSTANT_ROTATION_ATOL_RAD:
         raise ValueError(
             "trial rotation constant drift: "
             f"port={port_rotation_error:.3e}rad, "
@@ -1218,10 +1313,16 @@ def write_manifest(policy) -> None:
             ]
         )
     else:
-        sampling.append(
-            "  position_tiers_mm: ["
-            + ", ".join(f"{value * 1000.0:g}" for value in policy.sampling_tiers_m)
-            + "]"
+        sampling.extend(
+            [
+                "  position_tiers_mm: ["
+                + ", ".join(
+                    f"{value * 1000.0:g}" for value in policy.sampling_tiers_m
+                )
+                + "]",
+                "  minimum_actual_capture_clearance_mm: "
+                f"{policy.min_capture_clearance * 1000.0:g}",
+            ]
         )
     if policy.collection_policy in {"descent", "near-port"}:
         sampling.extend(
@@ -1249,15 +1350,25 @@ def write_manifest(policy) -> None:
             ]
         )
         if depth_visibility:
+            preserve_occluded = (
+                policy.collection_policy in ANNOTATION_PRESERVE_OCCLUDED_POLICIES
+            )
             annotations.extend(
                 [
-                    "  visibility_source: synchronized_depth",
+                    "  visibility_source: synchronized_depth_with_rgb_robot_mask",
                     "  depth_image_size_px: "
                     f"[{ANNOTATION_DEPTH_IMAGE_SIZE_PX[0]}, {ANNOTATION_DEPTH_IMAGE_SIZE_PX[1]}]",
                     f"  depth_update_rate_hz: {ANNOTATION_DEPTH_UPDATE_RATE_HZ:g}",
                     "  max_depth_rgb_skew_ms: "
                     f"{policy.annotation_depth_max_skew_ns / 1e6:g}",
-                    f"  minimum_visible_keypoints: {ANNOTATION_MIN_VISIBLE_KEYPOINTS}",
+                    "  minimum_visible_keypoints: "
+                    f"{0 if preserve_occluded else ANNOTATION_MIN_VISIBLE_KEYPOINTS}",
+                    "  preserve_fully_occluded: "
+                    f"{str(preserve_occluded).lower()}",
+                    "  rgb_robot_mask_fallback: "
+                    f"{str(preserve_occluded).lower()}",
+                    "  depth_patch_near_quantile: "
+                    f"{ANNOTATION_DEPTH_NEAR_QUANTILE:g}",
                     f"  occlusion_margin_m: {ANNOTATION_DEPTH_MARGIN_M:g}",
                 ]
             )
