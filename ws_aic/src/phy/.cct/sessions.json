@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "note": "This project's Codex/Claude Code session history lives in the private git repo named below, not in this repo. See .cct/README.md, or run `cct skill show`.",
+  "repo": "git@github.com:JungSeong/cct-sessions.git",
+  "project": "phy",
+  "path": "projects/phy",
+  "encryption": "plain"
+}
