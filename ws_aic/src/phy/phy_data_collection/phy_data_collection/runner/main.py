@@ -25,6 +25,7 @@ from phy_data_collection.runner.cli import parse_args
 from phy_data_collection.runner.constants import (
     COLLECTION_LOG_ROOT,
     CONFIG_DIR,
+    DESCENT_MIN_CLEARANCE_MM,
     MIN_CLEARANCE_MM,
     POLICY_MODULE,
     REGISTRY_FILENAME,
@@ -220,7 +221,7 @@ def _prepare_trial(
     ctx: RunContext,
     index: int,
     rng: random.Random,
-) -> tuple[str, Path, Path | None, dict]:
+) -> tuple[str, Path, Path | None, dict, dict]:
     """시나리오와 world를 랜덤화하고 trial 입력 파일을 기록한다."""
     config_path, requested_world_path = _trial_paths(ctx, index)
     config, scenario_params = make_trial_config(index, rng, ctx.args)
@@ -232,6 +233,9 @@ def _prepare_trial(
         requested_world_path,
     )
     scenario_params[task_id]["lighting"] = lighting
+    scenario_params[task_id]["task_id"] = task_id
+    scenario_params[task_id]["master_seed"] = ctx.args.seed
+    scenario_params[task_id]["trial_seed"] = ctx.args.seed + index * 1_000_003
     write_inputs(config, config_path)
     log_trial_randomization(
         index=index,
@@ -241,7 +245,13 @@ def _prepare_trial(
         lighting=lighting,
         args=ctx.args,
     )
-    return task_id, config_path, world_path, lighting
+    return (
+        task_id,
+        config_path,
+        world_path,
+        lighting,
+        scenario_params[task_id],
+    )
 
 
 def _print_dry_run(
@@ -258,7 +268,9 @@ def _print_dry_run(
 
 def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
     """하나의 trial을 실행하고 소유한 policy, rosbag, simulator를 검증한다."""
-    task_id, config_path, world_path, lighting = _prepare_trial(ctx, index, rng)
+    task_id, config_path, world_path, lighting, trial_metadata = _prepare_trial(
+        ctx, index, rng
+    )
     if ctx.args.dry_run:
         _print_dry_run(config_path, world_path, lighting)
         return
@@ -267,7 +279,7 @@ def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
     policy_group: OwnedProcessGroup | None = None
     rosbag_group: OwnedProcessGroup | None = None
     rosbag_session: RosbagSession | None = None
-    trial_completed = False
+    trial_summary: dict | None = None
     policy_ok = True
     rosbag_ok = True
     simulator_ok = True
@@ -339,6 +351,7 @@ def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
             run_id=ctx.run_id,
             trial_index=index,
             trial_split=_trial_split(ctx.args, index),
+            trial_metadata=trial_metadata,
             line_callback=line_callback,
         )
         policy_group = register_owned_group(
@@ -349,13 +362,13 @@ def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
         )
         ctx.active_groups.append(policy_group)
         _persist_groups(ctx)
-        trial_completed = wait_for_trial_summary(
+        trial_summary = wait_for_trial_summary(
             task_id,
             previous_summaries,
             timeout_s,
             [simulator_proc, policy_proc],
         )
-        if trial_completed:
+        if trial_summary is not None:
             post_summary_wait_s = max(
                 0.0,
                 float(ctx.args.post_summary_wait_s),
@@ -398,8 +411,15 @@ def _run_trial(ctx: RunContext, index: int, rng: random.Random) -> None:
 
     if not policy_ok or not rosbag_ok or not simulator_ok:
         raise RuntimeError("collector-owned PGID teardown verification failed")
-    if not trial_completed:
+    if trial_summary is None:
         raise RuntimeError(f"trial did not complete: task_id={task_id}")
+    if str(trial_summary.get("status", "")) != "ok":
+        raise RuntimeError(
+            "trial collection failed: "
+            f"task_id={task_id} status={trial_summary.get('status', 'missing')} "
+            f"collect_steps={trial_summary.get('collect_steps', 0)} "
+            f"detail={trial_summary.get('detail', '')}"
+        )
     time.sleep(max(0.0, float(ctx.args.between_trial_wait_s)))
 
 
@@ -460,10 +480,20 @@ def _prepare_args(args: argparse.Namespace) -> None:
         raise ValueError("sampling tiers and weights must have the same length")
     if args.dz_min_mm < 0.0:
         raise ValueError("dz-min-mm must be non-negative to preserve port clearance")
-    if args.base_z_offset_mm < MIN_CLEARANCE_MM:
+    if args.base_z_offset_mm < DESCENT_MIN_CLEARANCE_MM:
         raise ValueError(
-            f"base-z-offset-mm must be at least {MIN_CLEARANCE_MM:g}mm "
-            "to prevent plug-port contact"
+            "base-z-offset-mm must be at least "
+            f"{DESCENT_MIN_CLEARANCE_MM:g}mm for descent clearance"
+        )
+    if args.near_port_base_z_offset_mm < MIN_CLEARANCE_MM:
+        raise ValueError(
+            "near-port-base-z-offset-mm must be at least "
+            f"{MIN_CLEARANCE_MM:g}mm to prevent plug-port contact"
+        )
+    if args.near_port_min_capture_clearance_mm < MIN_CLEARANCE_MM:
+        raise ValueError(
+            "near-port-min-capture-clearance-mm must be at least "
+            f"{MIN_CLEARANCE_MM:g}mm"
         )
     if args.board_distance_min_mm < args.base_z_offset_mm:
         raise ValueError("board-distance-min-mm must preserve base-z-offset-mm clearance")

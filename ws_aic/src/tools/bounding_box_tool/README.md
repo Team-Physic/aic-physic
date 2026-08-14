@@ -65,8 +65,11 @@ JSONL 행도 제거합니다. 이 파일 삭제는 `Ctrl+Z`로 복원되지 않�
 검수한 뒤 `Ctrl+S`로 저장합니다.
 
 1. image 아래쪽에 연결된 큰 검은 영역을 robot-arm mask로 추출합니다.
-2. 4개 keypoint polygon과 mask가 90% 이상 겹치면 완전 가림으로 판단해 객체를 삭제합니다.
-3. 남은 객체에서 mask 안 keypoint는 `visibility=1`, 보이는 keypoint는 `2`로 바꿉니다.
+2. 4개 keypoint polygon과 mask가 90% 이상 겹치면 완전 가림으로 판단합니다.
+3. `sampling.collection_policy: near-port` 데이터셋은 완전 가림 객체를 삭제하지 않고
+   4개 keypoint를 모두 `visibility=1`로 유지합니다. 다른 policy는 기존처럼 객체를 삭제합니다.
+4. 남은 객체에서 mask 안 keypoint는 `visibility=1`, 보이는 keypoint는 `2`로 바꿉니다.
+   `near-port`에서 기존 depth 판정이 `1`인 keypoint는 RGB mask 밖이어도 `1`을 유지합니다.
 
 RGB 기반 근사 판정이므로 결과를 반드시 시각적으로 확인해야 합니다. `1`은 점선 원,
 `2`는 채워진 원으로 표시됩니다. 수집 프로세스가 같은 annotation 파일을 쓰는 동안에는

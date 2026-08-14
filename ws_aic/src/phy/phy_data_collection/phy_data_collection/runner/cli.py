@@ -119,6 +119,8 @@ def _add_pose_args(parser: argparse.ArgumentParser) -> None:
         "yaw_max_rad",
         "rpy_norm_max_rad",
         "base_z_offset_mm",
+        "near_port_base_z_offset_mm",
+        "near_port_min_capture_clearance_mm",
         "board_distance_min_mm",
         "board_distance_max_mm",
         "board_lateral_limit_mm",

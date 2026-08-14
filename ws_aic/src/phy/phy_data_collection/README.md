@@ -155,7 +155,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | --- | --- |
 | `board-view` | center camera optical axis가 보드 중앙을 향하도록 750~850mm 거리에서 횡방향 위치와 각도를 무작위화하고, 목표 port가 영상 안에 있는 capture만 저장 |
 | `descent` | 선택 포트를 향해 550mm부터 20mm 기준 거리까지 먼 순서로 내려오며 거리·횡방향 위치·각도를 무작위화 |
-| `near-port` | 20mm 기준 거리에서 50/10/5/2mm coarse/near tier를 수집 |
+| `near-port` | 1mm 기준 거리에서 50/10/5/2mm coarse/near tier를 수집 |
 
 `--port-type sfp`면 각 trial이 31개 non-empty 5-bit card 조합에서 하나를 uniform
 추출합니다. `--port-type sc`면 3개 non-empty 2-bit 조합에서 하나를 uniform 추출합니다.
@@ -186,7 +186,9 @@ SC:  Uniform({01, 10, 11})
 | `--pitch-min-rad`, `--pitch-max-rad` | 미지정 | 비대칭 pitch 범위 override |
 | `--yaw-min-rad`, `--yaw-max-rad` | 미지정 | 비대칭 yaw 범위 override |
 | `--rpy-norm-max-rad` | 미지정 | 생성된 RPY vector norm 상한 |
-| `--base-z-offset-mm` | `20` | descent/near-port의 접근축 명령 기준 거리 |
+| `--base-z-offset-mm` | `20` | descent의 최소 접근축 명령 거리 |
+| `--near-port-base-z-offset-mm` | `1` | near-port의 최소 접근축 명령 거리 |
+| `--near-port-min-capture-clearance-mm` | `1` | 저장을 허용하는 실제 최소 port 간격 |
 | `--board-distance-min-mm`, `--board-distance-max-mm` | `750`, `850` | board-view center camera optical 거리 범위 |
 | `--board-lateral-limit-mm` | `30` | board-view camera-plane X/Y 대칭 범위 |
 | `--board-angle-limit-rad` | `0.261799` | board-view RPY 대칭 범위 |
@@ -194,12 +196,15 @@ SC:  Uniform({01, 10, 11})
 | `--descent-lateral-limit-mm` | `40` | descent port-local X/Y 대칭 범위 |
 | `--descent-angle-limit-rad` | `0.349066` | descent RPY 대칭 범위 |
 
-기본 40 capture는 각 tier에 10개씩 배정됩니다. X/Y는 `±tier`, Z는 20mm 기준
+기본 40 capture는 각 tier에 10개씩 배정됩니다. X/Y는 `±tier`, Z는 1mm 기준
 거리에 `0~tier`를 더하고 RPY 범위도 tier 비율로 축소합니다. 첫 sample의 추가
-translation과 RPY는 모두 0이며 명령 거리는 20mm입니다. 물리 부하가
+translation과 RPY는 모두 0이며 명령 거리는 1mm입니다. 물리 부하가
 작은 coarse tier부터 near tier 순서로 진행하며, 각 tier 내부 값은 무작위화합니다.
-`--dz-min-mm`는 음수를 허용하지 않고 `--base-z-offset-mm`는 20mm 미만을 허용하지
-않습니다.
+`--dz-min-mm`는 음수를 허용하지 않습니다. descent의 `--base-z-offset-mm`는 20mm,
+near-port의 `--near-port-base-z-offset-mm`는 1mm 미만을 허용하지 않습니다.
+촬영 시점 TF로 계산한 실제 간격이
+`--near-port-min-capture-clearance-mm`보다 작으면 이미지를 저장하지 않고 안전 위치로
+후퇴한 뒤 다음 waypoint를 시도합니다.
 
 ### Sample 승인
 
@@ -341,6 +346,8 @@ trial이 정상 종료됩니다.
 ```text
 ws_aic/data/img2pos/<version>/
 ├── data.yaml
+├── constants.json
+├── trials.jsonl
 ├── metadata.jsonl
 ├── samples.jsonl
 ├── yolo_pose.yaml                  # auto annotation 활성화 시 생성
@@ -377,32 +384,55 @@ annotation을 활성화하면 runner가 기존 RGB와 pose·FOV가 같은 `576×
 depth sensor를 함께 띄웁니다. policy는 정지 완료 후 RGB 촬영 시각에서 `250ms` 이내인
 가장 가까운 depth frame을 사용하고, RGB keypoint를 depth 해상도로 비례 변환합니다.
 keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(`v=1`), 그렇지 않으면
-보임(`v=2`)으로 기록합니다. depth 기준 `3×3px` 주변 깊이의 median으로 rasterized edge
-오차를 줄입니다. `v=2` keypoint가 두 개 미만이면 bbox를 포함한 해당 YOLO Pose 행 전체를
-저장하지 않습니다. 즉 `0~1`점만 보이는 객체는 제외되고 `2~4`점이 보이는 객체만
-유지됩니다. 허용 시차 안의 depth frame이 없거나 RGB와 종횡비가 다르면 해당 sample
-저장을 실패시켜 visibility가 모두 `2`인 annotation으로 조용히 대체하지 않습니다.
+보임(`v=2`)으로 기록합니다. depth 기준 `5×5px` 주변 깊이의 가까운 쪽 20% quantile을
+사용해 작은 occluder가 median에서 사라지지 않게 합니다. `near-port`에서는 RGB의
+bottom-connected robot-arm mask도 함께 적용하고, 네 keypoint가 모두 가려져도 투영 위치와
+bbox를 삭제하지 않고 `v=1`로 유지합니다. 다른 policy는 `v=2` keypoint가 두 개 미만이면
+해당 YOLO Pose 행을 제외합니다. 허용 시차 안의 depth frame이 없거나 RGB와 종횡비가
+다르면 해당 sample 저장을 실패시켜 visibility가 모두 `2`인 annotation으로 조용히
+대체하지 않습니다.
 
 기존 geometry-only annotation과 depth visibility annotation을 한 version에 섞지 않도록,
 이 기능 적용 후에는 새 `--dataset-version`을 사용하는 것을 권장합니다. 기존 RGB
 데이터를 유지해야 하면 annotation editor의 후처리 결과를 별도로 검증한 뒤 저장합니다.
 
-`metadata.jsonl`은 수집 실행마다 한 row를 추가합니다.
+schema 11부터 반복 범위에 따라 pose와 calibration을 세 파일로 나눕니다. schema 12부터
+`near-port`의 완전 가림 port도 bbox와 투영 keypoint를 유지하고 visibility만 `1`로 기록합니다.
+
+- `constants.json`: dataset 전체의 camera intrinsic, `tool0_T_tcp`, camera optical
+  extrinsic, connector별 `plug_tip_T_plug_reference`, SE(3) 표현 순서와 검증 허용치
+- `trials.jsonl`: randomized scenario·조명, split, connector, 고정 port pose,
+  trial별 nominal `tcp_T_plug_reference`
+- `samples.jsonl`: 이미지, capture timestamp, 동적 TCP/camera/plug pose, 학습용
+  camera/plug/port residual과 상수의 미세 delta
+
+`metadata.jsonl`은 수집 실행마다 한 row를 추가하는 run provenance입니다.
 
 | 필드 | 의미 |
 | --- | --- |
 | `seed` | 실행 시작 시 자동 생성된 master seed |
 | `trials` | 실행한 전체 trial 수 |
 
-`samples.jsonl`의 한 row는 동일한 `capture_stamp_ns`를 공유하는 동기화 capture 하나에 대응합니다.
+`trials.jsonl`의 한 row는 한 randomized trial에 대응합니다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `trial_id`, `run_id`, `trial_index`, `task_id` | sample join과 실행 추적용 식별자 |
+| `split`, `connector`, `collection_policy` | trial 전체가 공유하는 분할·connector·수집 구간 |
+| `scenario` | board, card/rail/port, cable grasp RPY, robot home, 조명과 seed |
+| `poses.base_T_port_entrance` | 움직이지 않는 trial별 port entrance pose |
+| `transforms.tcp_T_plug_reference_nominal` | trial 첫 승인 capture의 grasp 기준 변환 |
+| `pose_source_stamps_ns.port_tf` | 고정 port snapshot의 원본 ROS 시각 |
+
+`samples.jsonl`의 한 row는 동일한 `capture_stamp_ns`를 공유하는 동기화 capture
+하나에 대응하며 `trial_id`로 `trials.jsonl`을 참조합니다.
 
 | 필드 | 의미 |
 | --- | --- |
 | `id` | 동기화 capture 식별자 |
-| `trial_id`, `split` | trial 식별자와 trial 단위 train/val/test 분할 |
-| `images`, `connector` | 항상 `left`, `center`, `right`를 모두 갖는 JPEG 상대 경로 mapping과 connector 구분 |
+| `trial_id` | `trials.jsonl` 외래키; split·connector·policy는 trial row에서 조회 |
+| `images` | 항상 `left`, `center`, `right`를 모두 갖는 JPEG 상대 경로 mapping |
 | `annotations`, `annotation_labels` | camera별 YOLO-pose TXT 상대 경로와 `SFP_<rail><port>` label 목록 |
-| `collection_policy` | `board-view`, `descent`, `near-port` 수집 구간 |
 | `target_xyz_m` | 공통 촬영 시점 `base_link`의 `port_entrance - plug_reference` correction |
 | `sampling_offset_xyz_m` | 명령 기준 거리를 제외한 실제 port-local XYZ; tier 분포 감사용 |
 | `sampling_tier_mm` | 호환성을 위해 유지하는 계획 sampling tier; 다른 정책은 `null` |
@@ -411,12 +441,19 @@ keypoint의 투영 깊이보다 `2mm` 이상 앞에 surface가 있으면 가림(
 | `view_distance_m` | 촬영 시점 plug와 port 사이 접근축 거리 |
 | `capture_stamp_ns` | 묶인 camera images의 공통 촬영 ROS 시각 |
 | `max_sync_skew_ns` | 승인 source들의 최대 시각 차이 |
+| `pose_source_stamps_ns` | camera capture, controller, plug TF의 원본 시각; port 시각은 trial row에 저장 |
+| `poses` | 촬영 시점 동적 `base_T_tcp`, camera 3대, plug tip/reference pose |
+| `se3_residuals` | camera·plug·port 학습 label과 dataset/trial 상수의 미세 delta; 각 transform은 `se3_log_vw`만 저장 |
+| `pose_reconstruction_max_abs_error` | 세 JSON 파일을 join한 `Exp(Log(T))`와 전역 pose 재합성의 최대 행렬 원소 오차 |
 | `settle_*` | 촬영 전 연속 controller frame 간 최종 TCP 이동량과 대기시간 |
 | `haptic_baseline_force_n`, `haptic_peak_delta_force_n` | 이동 직전 정적 하중과 승인 전 최대 보정 force |
 
 같은 trial의 모든 capture는 같은 split에 배정됩니다. 기본 34 trial은 정확히
-24 train, 5 validation, 5 test로 배정됩니다. command pose, RPY,
-scenario, projection, 전체 TF는 img2pos 입력·정답이 아니므로 dataset에 중복 저장하지
+24 train, 5 validation, 5 test로 배정됩니다. `se3_residuals`는 아직 connector별 nominal
+grasp를 빼지 않은 identity-reference logarithm입니다. trial nominal과 connector
+geometry로 옮긴 변환의 실제 미세 차이는 `constant_deltas`와 `trial_deltas`로 보존하므로
+세 파일을 join하면 원래 pose를 손실 없이 복원할 수 있습니다. pose/residual 역산
+오차가 `1e-9`를 넘거나 고정 변환 drift가 manifest 허용치를 넘는 capture는 저장하지
 않습니다.
 
 수집 완료 시 `collection_summary.json`에 capture/trial 수, split 누수, connector·tier

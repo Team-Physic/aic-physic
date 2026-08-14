@@ -322,6 +322,7 @@ def _policy_environment(
     run_id: str,
     trial_index: int | None = None,
     trial_split: str = "",
+    trial_metadata: dict | None = None,
 ) -> dict[str, str]:
     """PortOffsetCollect가 사용할 ROS 2 및 데이터 수집 환경변수를 구성한다."""
     env = os.environ.copy()
@@ -337,6 +338,13 @@ def _policy_environment(
         env["AIC_COLLECT_RANDOM_SEED"] = str(args.seed + trial_index * 1_000_003)
     if trial_split:
         env["AIC_IMG2POS_TRIAL_SPLIT"] = trial_split
+    if trial_metadata is not None:
+        env["AIC_IMG2POS_TRIAL_METADATA_JSON"] = json.dumps(
+            trial_metadata,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     env["AIC_COLLECT_STEPS"] = str(args.samples_per_trial)
     env["AIC_IMG2POS_COLLECTION_POLICY"] = args.collection_policy
     env["AIC_IMG2POS_DATASET_VERSION"] = args.dataset_version.strip()
@@ -369,7 +377,15 @@ def _policy_environment(
     _set_optional_env(env, "AIC_PORT_COLLECT_YAW_MAX_RAD", args.yaw_max_rad)
     _set_optional_env(env, "AIC_PORT_COLLECT_RPY_NORM_MAX_RAD", args.rpy_norm_max_rad)
     env["AIC_IMG2POS_MIN_VISIBLE_CAMERAS"] = str(args.min_visible_cameras)
-    env["AIC_PORT_COLLECT_BASE_Z_OFFSET_M"] = str(args.base_z_offset_mm / 1000.0)
+    base_z_offset_mm = (
+        args.near_port_base_z_offset_mm
+        if args.collection_policy == "near-port"
+        else args.base_z_offset_mm
+    )
+    env["AIC_PORT_COLLECT_BASE_Z_OFFSET_M"] = str(base_z_offset_mm / 1000.0)
+    env["AIC_NEAR_PORT_MIN_CAPTURE_CLEARANCE_M"] = str(
+        args.near_port_min_capture_clearance_mm / 1000.0
+    )
     env["AIC_BOARD_VIEW_DISTANCE_MIN_M"] = str(args.board_distance_min_mm / 1000.0)
     env["AIC_BOARD_VIEW_DISTANCE_MAX_M"] = str(args.board_distance_max_mm / 1000.0)
     env["AIC_BOARD_VIEW_LATERAL_LIMIT_M"] = str(args.board_lateral_limit_mm / 1000.0)
@@ -413,6 +429,7 @@ def start_policy(
     run_id: str,
     trial_index: int | None = None,
     trial_split: str = "",
+    trial_metadata: dict | None = None,
     line_callback: Callable[[str], None] | None = None,
 ) -> subprocess.Popen:
     """PortOffsetCollect ROS 2 node를 독립 session/PGID로 실행한다."""
@@ -422,6 +439,7 @@ def start_policy(
         run_id=run_id,
         trial_index=trial_index,
         trial_split=trial_split,
+        trial_metadata=trial_metadata,
     )
     try:
         stop_file.unlink()
@@ -641,13 +659,15 @@ def known_episode_summaries() -> set[Path]:
     return set(EPISODE_TRACKING_DIR.glob("*/episode_summary.json"))
 
 
-def _summary_matches_task(path: Path, task_id: str) -> bool:
-    """episode summary가 현재 task ID에 해당하는지 검증한다."""
+def _read_trial_summary(path: Path, task_id: str) -> dict | None:
+    """현재 task의 유효한 episode summary를 읽는다."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return False
-    return str(data.get("task_id", "")) == task_id
+        return None
+    if not isinstance(data, dict) or str(data.get("task_id", "")) != task_id:
+        return None
+    return data
 
 
 def wait_for_trial_summary(
@@ -655,15 +675,19 @@ def wait_for_trial_summary(
     known_summaries: set[Path],
     timeout_s: float,
     watch_procs: list[subprocess.Popen | None],
-) -> bool:
+) -> dict | None:
     """현재 task summary를 기다리며 policy와 simulator 조기 종료도 감시한다."""
     deadline = time.monotonic() + max(1.0, timeout_s)
     print(f"[wait] episode summary 대기: task_id={task_id}, timeout={timeout_s:.1f}s")
     while time.monotonic() < deadline:
         for summary_path in known_episode_summaries() - known_summaries:
-            if _summary_matches_task(summary_path, task_id):
-                print(f"[done] episode summary saved: {summary_path}")
-                return True
+            summary = _read_trial_summary(summary_path, task_id)
+            if summary is not None:
+                print(
+                    "[done] episode summary saved: "
+                    f"{summary_path} status={summary.get('status', 'missing')}"
+                )
+                return summary
         failed = [
             proc
             for proc in watch_procs
@@ -674,7 +698,7 @@ def wait_for_trial_summary(
                 "[warn] watched process exited before summary: "
                 f"returncode={failed[0].returncode}"
             )
-            return False
+            return None
         time.sleep(1.0)
     print(f"[warn] timeout waiting for task summary: {task_id}")
-    return False
+    return None

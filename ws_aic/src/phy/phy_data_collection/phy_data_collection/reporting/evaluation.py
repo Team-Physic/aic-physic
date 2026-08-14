@@ -24,6 +24,33 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _samples_with_trial_fields(dataset_dir: Path) -> list[dict[str, Any]]:
+    """schema 10 trial 상수를 sample에 join하고 legacy row도 그대로 지원한다."""
+    samples = _read_jsonl(dataset_dir / "samples.jsonl")
+    trials_path = dataset_dir / "trials.jsonl"
+    if not trials_path.is_file():
+        return samples
+    trials: dict[str, dict[str, Any]] = {}
+    for trial in _read_jsonl(trials_path):
+        trial_id = str(trial.get("trial_id", ""))
+        if not trial_id:
+            raise ValueError("trials.jsonl row is missing trial_id")
+        if trial_id in trials:
+            raise ValueError(f"duplicate trial row: {trial_id}")
+        trials[trial_id] = trial
+    joined = []
+    for sample in samples:
+        trial_id = str(sample.get("trial_id", ""))
+        trial = trials.get(trial_id)
+        if trial is None:
+            raise ValueError(f"{sample.get('id', '<unknown>')}: missing trial {trial_id}")
+        row = dict(sample)
+        for field in ("split", "connector", "collection_policy"):
+            row.setdefault(field, trial.get(field))
+        joined.append(row)
+    return joined
+
+
 def _vector(row: dict[str, Any], field: str) -> tuple[float, float, float]:
     """지정 필드를 유한한 XYZ meter vector로 검증한다."""
     values = row.get(field)
@@ -75,8 +102,7 @@ def _percentile(values: list[float], percentile: float) -> float:
 
 def summarize_dataset(dataset_dir: Path) -> dict[str, Any]:
     """capture 독립성을 보존해 split과 XYZ label 분포를 요약한다."""
-    samples_path = dataset_dir / "samples.jsonl"
-    rows = _read_jsonl(samples_path)
+    rows = _samples_with_trial_fields(dataset_dir)
     captures: dict[str, dict[str, Any]] = {}
     trial_splits: dict[str, set[str]] = defaultdict(set)
     image_counts_by_split: Counter[str] = Counter()
@@ -222,7 +248,7 @@ def evaluate_predictions(
     insertion_results_path: Path | None = None,
 ) -> dict[str, Any]:
     """전체 및 split별 예측 오차와 선택적 closed-loop 성공률을 반환한다."""
-    samples = _read_jsonl(dataset_dir / "samples.jsonl")
+    samples = _samples_with_trial_fields(dataset_dir)
     predictions = {str(row["id"]): row for row in _read_jsonl(predictions_path)}
     report = {
         "all": _prediction_metrics(samples, predictions),

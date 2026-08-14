@@ -139,9 +139,21 @@ class PortOffsetCollect(Policy):
         self.step_sleep_s = 1.0 / (fps if fps > 0 else 20.0)
         self.capture_root = Path(os.environ.get("AIC_CAPTURE_DIR", "/tmp/aic_episodes"))
         self.collect_steps = max(1, int(os.environ["AIC_COLLECT_STEPS"]))
+        default_base_z_offset = (
+            motion.NEAR_PORT_BASE_Z_OFFSET_M
+            if self.collection_policy == "near-port"
+            else motion.DEFAULT_BASE_Z_OFFSET_M
+        )
         self.base_z_offset = max(
             motion.MIN_CLEARANCE_M,
-            _env_float("AIC_PORT_COLLECT_BASE_Z_OFFSET_M", motion.MIN_CLEARANCE_M),
+            _env_float("AIC_PORT_COLLECT_BASE_Z_OFFSET_M", default_base_z_offset),
+        )
+        self.min_capture_clearance = max(
+            motion.MIN_CLEARANCE_M,
+            _env_float(
+                "AIC_NEAR_PORT_MIN_CAPTURE_CLEARANCE_M",
+                motion.MIN_CLEARANCE_M,
+            ),
         )
         self.sync_tolerance_ns = int(
             max(0.0, _env_float("AIC_COLLECT_SYNC_TOLERANCE_MS", 30.0)) * 1e6
@@ -221,8 +233,19 @@ class PortOffsetCollect(Policy):
         ).expanduser()
         self.dataset_version = os.environ.get("AIC_IMG2POS_DATASET_VERSION", "").strip()
         self.samples_path = self.dataset_dir / "samples.jsonl"
+        self.trials_path = self.dataset_dir / "trials.jsonl"
+        self.constants_path = self.dataset_dir / "constants.json"
         self.run_id = os.environ.get("AIC_PORTOFFSET_RUN_ID", "").strip()
         self.trial_index = _env_optional_int("AIC_PORTOFFSET_TRIAL_INDEX")
+        try:
+            trial_metadata = json.loads(
+                os.environ.get("AIC_IMG2POS_TRIAL_METADATA_JSON", "{}")
+            )
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid AIC_IMG2POS_TRIAL_METADATA_JSON") from exc
+        if not isinstance(trial_metadata, dict):
+            raise ValueError("AIC_IMG2POS_TRIAL_METADATA_JSON must be an object")
+        self.trial_metadata = trial_metadata
         self.val_ratio = _env_float("AIC_IMG2POS_VAL_RATIO", 0.15)
         self.test_ratio = _env_float("AIC_IMG2POS_TEST_RATIO", 0.15)
         self.trial_split = os.environ.get("AIC_IMG2POS_TRIAL_SPLIT", "").strip().lower()
@@ -525,6 +548,7 @@ class PortOffsetCollect(Policy):
             "collect_steps": counts["collect"],
             "collect_attempts": counts["attempts"],
             "haptic_contacts": counts["haptic_contacts"],
+            "clearance_rejections": counts["clearance_rejections"],
         }
         summary_path = episode_dir / "episode_summary.json"
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -551,6 +575,7 @@ class PortOffsetCollect(Policy):
             "collect": 0,
             "attempts": 0,
             "haptic_contacts": 0,
+            "clearance_rejections": 0,
         }
         if not self.record:
             return self._finish(episode_dir, task, counts, "recording_disabled")

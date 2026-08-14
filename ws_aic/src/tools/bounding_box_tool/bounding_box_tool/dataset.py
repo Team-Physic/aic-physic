@@ -50,6 +50,7 @@ class ImageDataset:
     dataset_root: Path | None
     entries: tuple[ImageEntry, ...]
     class_names: dict[int, str]
+    collection_policy: str | None = None
 
     @classmethod
     def open(cls, selected_path: str | Path) -> "ImageDataset":
@@ -76,6 +77,7 @@ class ImageDataset:
             dataset_root=root,
             entries=entries,
             class_names=load_class_names(root),
+            collection_policy=load_collection_policy(root),
         )
 
 
@@ -164,6 +166,21 @@ def load_class_names(root: Path | None) -> dict[int, str]:
                 continue
         return result
     return {}
+
+
+def load_collection_policy(root: Path | None) -> str | None:
+    """yolo_pose.yaml에서 데이터 수집 policy를 읽는다."""
+    if root is None:
+        return None
+    config_path = root / "yolo_pose.yaml"
+    if not config_path.is_file():
+        return None
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    sampling = data.get("sampling", {})
+    if not isinstance(sampling, dict):
+        return None
+    policy = str(sampling.get("collection_policy", "")).strip()
+    return policy or None
 
 
 def load_annotations(
