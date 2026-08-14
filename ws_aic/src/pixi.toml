@@ -9,6 +9,7 @@ conda-pypi-map = { "robostack-kilted" = "aic/robostack_mapping.json", "conda-for
 
 [tasks]
 view_annotations = "PYTHONPATH=tools/bounding_box_tool python -m bounding_box_tool.main"
+phy_dashboard = "ros2 run phy_dashboard phy_dashboard"
 
 [target.linux-64.dependencies]
 evdev = ">=1.9.2,<2"
@@ -54,6 +55,7 @@ ultralytics = ">=8.3,<9"
 pyqt = ">=5.15,<6"
 pyyaml = ">=6,<7"
 ros-kilted-phy-data-collection = { path = "phy/phy_data_collection" }
+ros-kilted-phy-dashboard = { path = "phy/phy_dashboard/package.xml" }
 ros-kilted-ros2bag = "*"
 ros-kilted-rosbag2-storage-sqlite3 = "*"
 

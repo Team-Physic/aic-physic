@@ -15,15 +15,23 @@ from aic_model.policy import (
 from aic_task_interfaces.msg import Task
 from geometry_msgs.msg import PointStamped
 from rclpy.duration import Duration
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
+from sensor_msgs.msg import Image
 
 from . import motion
 from .final_policy_vision import (
+    CAMERAS,
     PortEstimate,
     PortVision,
     TargetSpec,
     target_from_task,
 )
+
+
+DEBUG_IMAGE_TOPICS = {
+    camera: f"/final_policy/yolo/{camera}/image" for camera in CAMERAS
+}
 
 
 def _env_float(name: str, default: float) -> float:
@@ -72,6 +80,43 @@ class FinalPolicy(Policy):
         self._publisher = parent_node.create_publisher(
             PointStamped, "/final_policy/triangulated_port_xyz", 10
         )
+        self._debug_image_publishers = {
+            camera: parent_node.create_publisher(
+                Image, topic, qos_profile_sensor_data
+            )
+            for camera, topic in DEBUG_IMAGE_TOPICS.items()
+        }
+        self._debug_publish_error_logged = False
+
+    def _publish_yolo_debug(self, camera, result, source, header) -> None:
+        """subscriber가 있을 때만 Ultralytics overlay를 ROS Image로 발행한다."""
+        publisher = self._debug_image_publishers.get(camera)
+        if publisher is None or publisher.get_subscription_count() < 1:
+            return
+        try:
+            annotated = result.plot(
+                img=np.asarray(source).copy(),
+                boxes=True,
+                labels=True,
+                conf=True,
+                kpt_line=True,
+            )
+            annotated = np.ascontiguousarray(annotated, dtype=np.uint8)
+            if annotated.ndim != 3 or annotated.shape[2] != 3:
+                raise ValueError(f"invalid overlay shape: {annotated.shape}")
+            message = Image()
+            if header is not None:
+                message.header = header
+            message.height, message.width = annotated.shape[:2]
+            message.encoding = "bgr8"
+            message.is_bigendian = False
+            message.step = int(message.width * 3)
+            message.data = annotated.tobytes()
+            publisher.publish(message)
+        except Exception as exc:
+            if not self._debug_publish_error_logged:
+                self.get_logger().warn(f"FinalPolicy: YOLO overlay failed: {exc}")
+                self._debug_publish_error_logged = True
 
     def lookup_transform_at(self, target: str, source: str, stamp):
         """지정 ROS simulation timestamp의 source-to-target transform을 조회한다."""
@@ -286,7 +331,11 @@ class FinalPolicy(Policy):
             self.get_logger().error(f"FinalPolicy: invalid task: {exc}")
             return False
         self._estimate = None
-        vision = PortVision(self, self._target)
+        vision = PortVision(
+            self,
+            self._target,
+            debug_image_callback=self._publish_yolo_debug,
+        )
         self.get_logger().info(
             f"[FinalPolicy] target: type={self._target.port_type}, "
             f"rail={self._target.rail_index}, port={self._target.port_index}, "

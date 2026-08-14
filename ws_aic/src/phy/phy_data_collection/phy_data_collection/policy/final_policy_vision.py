@@ -6,7 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -170,13 +170,23 @@ def track_keypoints(
     return current[:, 0][valid], float(np.sqrt(np.mean(np.square(errors[valid]))))
 
 
+DebugImageCallback = Callable[[str, Any, np.ndarray, Any], None]
+
+
 class PortVision:
     """YOLO exact-class detection을 base_link pose와 연속 track으로 변환한다."""
 
-    def __init__(self, policy, target: TargetSpec, model=None):
+    def __init__(
+        self,
+        policy,
+        target: TargetSpec,
+        model=None,
+        debug_image_callback: DebugImageCallback | None = None,
+    ):
         self.policy = policy
         self.target = target
         self.model = model
+        self.debug_image_callback = debug_image_callback
         self.confidence = _env_float("AIC_YOLO_CONFIDENCE", 0.8)
         self.keypoint_confidence = _env_float("AIC_YOLO_KEYPOINT_CONFIDENCE", 0.25)
         self.device = os.environ.get("AIC_YOLO_DEVICE", "cpu").strip() or "cpu"
@@ -229,8 +239,12 @@ class PortVision:
         return True
 
     def _projection_data(self, observation) -> dict[str, Any] | None:
+        image_messages = {
+            camera: dataset.image_for_camera(observation, camera)
+            for camera in CAMERAS
+        }
         stamps = {
-            camera: _stamp_ns(dataset.image_for_camera(observation, camera).header.stamp)
+            camera: _stamp_ns(image_messages[camera].header.stamp)
             for camera in CAMERAS
         }
         if (
@@ -245,7 +259,7 @@ class PortVision:
         camera_origins: dict[str, np.ndarray] = {}
         for camera in CAMERAS:
             image = dataset.image_to_bgr(
-                self.policy, dataset.image_for_camera(observation, camera), camera
+                self.policy, image_messages[camera], camera
             )
             camera_info = dataset.camera_info_for(observation, camera)
             if image is None or camera_info is None or len(camera_info.k) < 9:
@@ -271,6 +285,9 @@ class PortVision:
         return {
             "stamp": reference_stamp,
             "stamp_ns": _stamp_ns(reference_stamp),
+            "headers": {
+                camera: image_messages[camera].header for camera in CAMERAS
+            },
             "images": images,
             "projections": projections,
             "transforms": transforms,
@@ -285,7 +302,11 @@ class PortVision:
             value = value.cpu()
         return np.asarray(value)
 
-    def _detect(self, images: dict[str, np.ndarray]) -> dict[str, list[dict[str, Any]]]:
+    def _detect(
+        self,
+        images: dict[str, np.ndarray],
+        headers: dict[str, Any] | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
         if self.model is None:
             return {camera: [] for camera in CAMERAS}
         source = [images[camera] for camera in CAMERAS]
@@ -298,6 +319,18 @@ class PortVision:
         )
         detections = {camera: [] for camera in CAMERAS}
         for camera, result in zip(CAMERAS, results):
+            if self.debug_image_callback is not None:
+                try:
+                    self.debug_image_callback(
+                        camera,
+                        result,
+                        images[camera],
+                        headers.get(camera) if headers is not None else None,
+                    )
+                except Exception as exc:
+                    self.policy.get_logger().warn(
+                        f"FinalPolicy: debug image publish failed: {exc}"
+                    )
             if result.boxes is None or result.keypoints is None:
                 continue
             points_all = self._numpy(result.keypoints.xy)
@@ -424,7 +457,9 @@ class PortVision:
             return None
         if data is None:
             return None
-        candidates = self._estimate_candidates(data, self._detect(data["images"]))
+        candidates = self._estimate_candidates(
+            data, self._detect(data["images"], data["headers"])
+        )
         return candidates[0] if candidates else None
 
     def track(self, observation, previous: PortEstimate) -> PortEstimate | None:
@@ -437,7 +472,7 @@ class PortVision:
             return None
         if data is None or data["stamp_ns"] <= previous.stamp_ns:
             return None
-        current_detections = self._detect(data["images"])
+        current_detections = self._detect(data["images"], data["headers"])
         selected: dict[str, list[dict[str, Any]]] = {}
         for camera, previous_detection in previous.detections.items():
             if not current_detections.get(camera):

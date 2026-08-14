@@ -512,6 +512,8 @@ environments:
         build: hb0f4dca_0
       - conda: aic/aic_utils/lerobot_robot_aic
         build: hb0f4dca_0
+      - conda: phy/phy_dashboard/package.xml
+        build: hb0f4dca_0
       - conda: phy/phy_data_collection
         build: hb0f4dca_0
       - pypi: https://files.pythonhosted.org/packages/18/a6/907a406bb7d359e6a63f99c313846d9eec4f7e6f7437809e03aa00fa3074/absl_py-2.4.0-py3-none-any.whl
@@ -1058,6 +1060,8 @@ environments:
       - conda: aic/aic_utils/aic_training_interfaces
         build: h60d57d3_0
       - conda: aic/aic_utils/lerobot_robot_aic
+        build: h60d57d3_0
+      - conda: phy/phy_dashboard/package.xml
         build: h60d57d3_0
       - conda: phy/phy_data_collection
         build: h60d57d3_0
@@ -12059,6 +12063,44 @@ packages:
   license: Apache-2.0
   size: 65533
   timestamp: 1783541536937
+- conda: phy/phy_dashboard/package.xml
+  name: ros-kilted-phy-dashboard
+  version: 0.1.0
+  build: h60d57d3_0
+  subdir: osx-arm64
+  variants:
+    target_platform: osx-arm64
+  depends:
+  - numpy
+  - numpy >=1.25,<3
+  - ros-kilted-geometry-msgs
+  - ros-kilted-rclpy
+  - ros-kilted-sensor-msgs
+  - ros2-distro-mutex
+  - ros2-distro-mutex >=0.17.0,<0.18.0a0
+  - libcxx >=22
+  - python_abi 3.12.* *_cp312
+  license: LicenseRef-Proprietary
+- conda: phy/phy_dashboard/package.xml
+  name: ros-kilted-phy-dashboard
+  version: 0.1.0
+  build: hb0f4dca_0
+  subdir: linux-64
+  variants:
+    target_platform: linux-64
+  depends:
+  - numpy
+  - numpy >=1.25,<3
+  - ros-kilted-geometry-msgs
+  - ros-kilted-rclpy
+  - ros-kilted-sensor-msgs
+  - ros2-distro-mutex
+  - ros2-distro-mutex >=0.17.0,<0.18.0a0
+  - libgcc >=16
+  - libgcc >=16
+  - libstdcxx >=16
+  - python_abi 3.12.* *_cp312
+  license: LicenseRef-Proprietary
 - conda: phy/phy_data_collection
   name: ros-kilted-phy-data-collection
   version: 0.1.0

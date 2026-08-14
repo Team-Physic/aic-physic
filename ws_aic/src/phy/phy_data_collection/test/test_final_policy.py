@@ -112,6 +112,9 @@ class _Logger:
     def error(self, _message):
         pass
 
+    def warn(self, _message):
+        pass
+
 
 class _Policy:
     def __init__(self):
@@ -191,3 +194,33 @@ def test_detection_never_switches_to_other_rail_or_port():
         camera_detections[0]["class_name"] == "SFP_41"
         for camera_detections in detections.values()
     )
+
+
+def test_detection_forwards_each_yolo_result_to_debug_callback():
+    target = target_from_task(
+        SimpleNamespace(
+            port_type="sfp",
+            target_module_name="nic_card_mount_4",
+            port_name="sfp_port_1",
+        )
+    )
+    published = []
+    vision = PortVision(
+        _Policy(),
+        target,
+        model=_FakeModel(),
+        debug_image_callback=lambda camera, result, image, header: published.append(
+            (camera, result, image.shape, header)
+        ),
+    )
+    images = {
+        camera: np.zeros((60, 60, 3), dtype=np.uint8)
+        for camera in ("left", "center", "right")
+    }
+    headers = {camera: object() for camera in images}
+
+    vision._detect(images, headers)
+
+    assert [camera for camera, *_rest in published] == ["left", "center", "right"]
+    assert all(shape == (60, 60, 3) for _camera, _result, shape, _header in published)
+    assert all(header is headers[camera] for camera, _result, _shape, header in published)
