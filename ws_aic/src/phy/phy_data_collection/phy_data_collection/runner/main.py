@@ -29,6 +29,8 @@ from phy_data_collection.runner.constants import (
     MIN_CLEARANCE_MM,
     POLICY_MODULE,
     REGISTRY_FILENAME,
+    SC_RAIL_COUNT,
+    SFP_NIC_RAIL_COUNT,
     TRIAL_TIMEOUT_GRACE_S,
 )
 from phy_data_collection.reporting.evaluation import summarize_dataset
@@ -466,6 +468,11 @@ def _prepare_args(args: argparse.Namespace) -> None:
     """대규모/병렬 수집 인자를 검증하고 안전한 기본 출력 version을 확정한다."""
     if args.trials < 1 or args.samples_per_trial < 1:
         raise ValueError("trials and samples-per-trial must be positive")
+    rail_count = SFP_NIC_RAIL_COUNT if args.port_type == "sfp" else SC_RAIL_COUNT
+    if not 1 <= args.min_card_count <= rail_count:
+        raise ValueError(
+            f"min-card-count must be in [1, {rail_count}] for {args.port_type}"
+        )
     if not hasattr(args, "seed"):
         args.seed = secrets.randbits(64)
     if args.workers < 1 or args.workers > args.trials:

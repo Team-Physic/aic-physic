@@ -670,8 +670,13 @@ def _follow(
     *,
     get_observation=None,
     haptic_guard: HapticGuard | None = None,
+    step_guard=None,
 ) -> bool:
-    """현재 TCP에서 목표 pose까지 S-curve 위치·자세 명령을 보낸다."""
+    """현재 TCP에서 목표 pose까지 S-curve 위치·자세 명령을 보낸다.
+
+    ``step_guard``가 주어지면 각 waypoint 명령 직전에 호출한다. False를 반환하면
+    해당 waypoint를 보내지 않고 현재 위치에서 경로를 중단한다.
+    """
     start_xyz = np.array([start.position.x, start.position.y, start.position.z])
     target_xyz = np.array([target.position.x, target.position.y, target.position.z])
     for index in range(max(1, steps)):
@@ -687,7 +692,14 @@ def _follow(
             pose.orientation.z,
             pose.orientation.w,
         ) = map(float, quaternion)
-        policy.set_pose_target(move_robot, pose, stiffness, damping)
+        if step_guard is not None and not step_guard(index, pose):
+            policy.get_logger().info(
+                f"{label}: stopped by waypoint guard before {index + 1}/{max(1, steps)}"
+            )
+            return False
+        policy.set_pose_target(
+            move_robot, pose, stiffness=stiffness, damping=damping
+        )
         if index in {0, max(1, steps) - 1}:
             policy.get_logger().info(
                 f"{label}: waypoint {index + 1}/{max(1, steps)} "
@@ -698,7 +710,9 @@ def _follow(
         if haptic_guard is not None and haptic_guard.observe(observation):
             current = _tcp_pose(observation)
             if current is not None:
-                policy.set_pose_target(move_robot, current, stiffness, damping)
+                policy.set_pose_target(
+                    move_robot, current, stiffness=stiffness, damping=damping
+                )
             policy.get_logger().error(
                 "[PortOffsetCollect] HAPTIC CONTACT: "
                 f"stage={label}, delta={haptic_guard.last_delta_force_n:.2f}N, "

@@ -78,6 +78,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | --- | ---: | --- |
 | `--port-type` | 필수 | 모든 trial에서 사용할 connector: `sfp` 또는 `sc` |
 | `--trials` | `34` | 실행할 전체 trial 수 |
+| `--min-card-count` | `1` | 각 trial에 생성할 최소 card 수 (`sfp`: 최대 5, `sc`: 최대 2) |
 | `--workers` | `1` | 동시에 실행할 격리 simulator 수 |
 | `--color-log {true,false}` | `true` | terminal ANSI 색상 로그 사용 여부 |
 | `--samples-per-trial` | `40` | trial마다 저장할 capture 수 |
@@ -157,8 +158,10 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `descent` | 선택 포트를 향해 550mm부터 20mm 기준 거리까지 먼 순서로 내려오며 거리·횡방향 위치·각도를 무작위화 |
 | `near-port` | 1mm 기준 거리에서 50/10/5/2mm coarse/near tier를 수집 |
 
-`--port-type sfp`면 각 trial이 31개 non-empty 5-bit card 조합에서 하나를 uniform
-추출합니다. `--port-type sc`면 3개 non-empty 2-bit 조합에서 하나를 uniform 추출합니다.
+기본 `--min-card-count 1`에서 `--port-type sfp`면 각 trial이 31개 non-empty 5-bit card
+조합에서 하나를 uniform 추출합니다. `--port-type sc`면 3개 non-empty 2-bit 조합에서
+하나를 uniform 추출합니다. 예를 들어 `--min-card-count 2`를 지정하면 card가 두 장 이상인
+조합만 후보로 사용합니다.
 bit의 오른쪽부터 rail 0, 1, ...에 대응하며 `0`은 card 없음, `1`은 card 생성을 뜻합니다.
 target rail도 추출된 조합의 활성 rail 중에서 uniform 선택합니다.
 각 NIC card의 rail 방향 translation은 공식 rail 한계인 `-21.5~+23.4mm`에서

@@ -54,6 +54,7 @@ ROSBAG_TOPICS = (
 CLI_DEFAULTS = {
     # Trial and simulator.
     "trials": 34,
+    "min_card_count": 1,
     "workers": 1,
     "color_log": True,
     "samples_per_trial": 40,

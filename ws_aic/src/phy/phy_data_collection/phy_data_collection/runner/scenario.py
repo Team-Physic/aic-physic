@@ -489,10 +489,14 @@ def make_trial_config(
     rng: random.Random,
     args: argparse.Namespace,
 ) -> tuple[dict, dict]:
-    """선택 connector의 non-empty card 조합을 uniform 추출해 trial config를 만든다."""
+    """최소 card 수를 만족하는 조합을 uniform 추출해 trial config를 만든다."""
     port_type = args.port_type
     rail_count = SFP_NIC_RAIL_COUNT if port_type == "sfp" else SC_RAIL_COUNT
-    combination_mask = rng.randint(1, (1 << rail_count) - 1)
+    combination_mask = _sample_combination_mask(
+        rng,
+        rail_count=rail_count,
+        min_card_count=args.min_card_count,
+    )
     if port_type == "sfp":
         task_id, trial, scenario_params = _make_sfp_trial(
             index, combination_mask, rng, args
@@ -512,3 +516,20 @@ def make_trial_config(
         "home_joint_positions"
     ]
     return config, scenario_params
+
+
+def _sample_combination_mask(
+    rng: random.Random,
+    *,
+    rail_count: int,
+    min_card_count: int,
+) -> int:
+    """요구 card 수 이상인 bit mask 중 하나를 균등하게 고른다."""
+    if rail_count < 1 or not 1 <= min_card_count <= rail_count:
+        raise ValueError("min_card_count must be between 1 and rail_count")
+    eligible_masks = tuple(
+        mask
+        for mask in range(1, 1 << rail_count)
+        if mask.bit_count() >= min_card_count
+    )
+    return rng.choice(eligible_masks)
