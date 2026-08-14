@@ -35,6 +35,7 @@ ws_aic/notebook/
 ws_aic/build/
 ws_aic/install/
 ws_aic/log/
+ws_aic/logs/
 ws_aic/src/data/
 ws_aic/src/model/
 ws_aic/src/build/

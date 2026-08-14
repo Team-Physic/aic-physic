@@ -23,8 +23,8 @@ setup(
     extras_require={"test": ["pytest"]},
     entry_points={
         "console_scripts": [
-            "collect_portoffset_randomization_data = phy_data_collection.main:main",
-            "evaluate_img2pos = phy_data_collection.evaluation:main",
+            "collect_portoffset_randomization_data = phy_data_collection.runner.main:main",
+            "evaluate_img2pos = phy_data_collection.reporting.evaluation:main",
         ],
     },
 )
