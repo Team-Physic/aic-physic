@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 from geometry_msgs.msg import Pose
 
-from phy_data_collection.policy import motion
-from phy_data_collection.policy.final_policy_vision import (
+from phy_policy.ros import motion
+from phy_policy.ros.final_policy_vision import (
     PortVision,
     plane_normal,
     project_point,

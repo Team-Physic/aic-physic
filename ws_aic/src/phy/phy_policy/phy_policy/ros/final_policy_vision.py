@@ -11,7 +11,6 @@ from typing import Any, Callable
 import cv2
 import numpy as np
 
-from . import dataset
 from .geometry import transform_matrix
 
 
@@ -36,6 +35,29 @@ def _env_float(name: str, default: float) -> float:
 
 def _stamp_ns(stamp) -> int:
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+
+
+def _image_for_camera(observation, camera: str):
+    return getattr(observation, f"{camera}_image")
+
+
+def _camera_info_for(observation, camera: str):
+    return getattr(observation, f"{camera}_camera_info")
+
+
+def _image_to_bgr(policy, message, camera: str) -> np.ndarray | None:
+    if message is None or message.width == 0 or message.height == 0:
+        return None
+    try:
+        image = np.frombuffer(message.data, dtype=np.uint8).reshape(
+            message.height, message.width, 3
+        )
+    except ValueError:
+        policy.get_logger().warn(f"FinalPolicy: invalid {camera} image buffer")
+        return None
+    if message.encoding == "rgb8":
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    return image.copy()
 
 
 @dataclass(frozen=True)
@@ -240,7 +262,7 @@ class PortVision:
 
     def _projection_data(self, observation) -> dict[str, Any] | None:
         image_messages = {
-            camera: dataset.image_for_camera(observation, camera)
+            camera: _image_for_camera(observation, camera)
             for camera in CAMERAS
         }
         stamps = {
@@ -258,10 +280,8 @@ class PortVision:
         transforms: dict[str, np.ndarray] = {}
         camera_origins: dict[str, np.ndarray] = {}
         for camera in CAMERAS:
-            image = dataset.image_to_bgr(
-                self.policy, image_messages[camera], camera
-            )
-            camera_info = dataset.camera_info_for(observation, camera)
+            image = _image_to_bgr(self.policy, image_messages[camera], camera)
+            camera_info = _camera_info_for(observation, camera)
             if image is None or camera_info is None or len(camera_info.k) < 9:
                 return None
             intrinsic = np.asarray(camera_info.k, dtype=float).reshape(3, 3)
