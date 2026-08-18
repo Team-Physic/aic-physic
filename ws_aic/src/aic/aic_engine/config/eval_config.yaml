@@ -53,6 +53,10 @@ task_board_limits:
   mount_rail:
     min_translation: -0.09425  # Minimum translation from center along the rail (in meters)
     max_translation: 0.09425   # Maximum translation from center along the rail (in meters)
+randomization:
+  nic_cards:
+    min_count: 2
+    max_count: 5
 trials:
   trial_1:
     scene:
