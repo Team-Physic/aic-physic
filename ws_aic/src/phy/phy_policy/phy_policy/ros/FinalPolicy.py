@@ -21,6 +21,8 @@ from sensor_msgs.msg import Image
 
 from . import motion
 from .final_policy_vision import (
+    ANSI_BLUE,
+    ANSI_RESET,
     CAMERAS,
     PortEstimate,
     PortVision,
@@ -32,6 +34,7 @@ from .final_policy_vision import (
 DEBUG_IMAGE_TOPICS = {
     camera: f"/final_policy/yolo/{camera}/image" for camera in CAMERAS
 }
+ANSI_GREEN = "\033[1;32m"
 
 
 def _env_float(name: str, default: float) -> float:
@@ -127,16 +130,19 @@ class FinalPolicy(Policy):
             timeout=Duration(seconds=self.sync_wait_timeout_s),
         )
 
-    def _publish_estimate(self, estimate: PortEstimate, label: str) -> None:
+    def _publish_estimate(
+        self, estimate: PortEstimate, label: str, color: str = ""
+    ) -> None:
         message = PointStamped()
         message.header.frame_id = "base_link"
         message.header.stamp = estimate.stamp
         message.point.x, message.point.y, message.point.z = map(float, estimate.xyz)
         self._publisher.publish(message)
         self.get_logger().info(
-            f"[FinalPolicy] {label}: class={estimate.class_name}, "
+            f"{color}[FinalPolicy] {label}: class={estimate.class_name}, "
             f"xyz=({estimate.xyz[0]:+.4f}, {estimate.xyz[1]:+.4f}, "
-            f"{estimate.xyz[2]:+.4f}), reproj={estimate.reprojection_rms_px:.2f}px"
+            f"{estimate.xyz[2]:+.4f}), "
+            f"reproj={estimate.reprojection_rms_px:.2f}px{ANSI_RESET}"
         )
 
     @staticmethod
@@ -234,7 +240,9 @@ class FinalPolicy(Policy):
             tracked = vision.track(observation, provisional)
             if tracked is not None:
                 self._estimate = tracked
-                self._publish_estimate(tracked, f"track waypoint={index + 1}")
+                self._publish_estimate(
+                    tracked, f"track waypoint={index + 1}", ANSI_GREEN
+                )
                 return True
             reacquired = vision.estimate(observation)
             if (
@@ -248,7 +256,9 @@ class FinalPolicy(Policy):
                 if reacquire_hits >= self.track_reacquire_hits:
                     self._estimate = provisional
                     self._publish_estimate(
-                        provisional, f"track reacquired waypoint={index + 1}"
+                        provisional,
+                        f"track reacquired waypoint={index + 1}",
+                        ANSI_GREEN,
                     )
                     return True
             else:
@@ -337,9 +347,9 @@ class FinalPolicy(Policy):
             debug_image_callback=self._publish_yolo_debug,
         )
         self.get_logger().info(
-            f"[FinalPolicy] target: type={self._target.port_type}, "
+            f"{ANSI_BLUE}[FinalPolicy] target: type={self._target.port_type}, "
             f"rail={self._target.rail_index}, port={self._target.port_index}, "
-            f"class={self._target.class_name}"
+            f"class={self._target.class_name}{ANSI_RESET}"
         )
         if not vision.load_model():
             return False

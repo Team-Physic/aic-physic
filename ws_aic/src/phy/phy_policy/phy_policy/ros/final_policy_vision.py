@@ -24,6 +24,8 @@ CAMERA_FRAMES = {
 CLASS_PATTERN = re.compile(r"^SFP_(\d+)(\d)$", re.IGNORECASE)
 VALID_RAILS = range(5)
 VALID_PORTS = range(2)
+ANSI_BLUE = "\033[1;34m"
+ANSI_RESET = "\033[0m"
 
 
 def _env_float(name: str, default: float) -> float:
@@ -257,7 +259,9 @@ class PortVision:
         except Exception as exc:
             self.policy.get_logger().error(f"FinalPolicy: YOLO load failed: {exc}")
             return False
-        self.policy.get_logger().info(f"FinalPolicy: YOLO device override: {self.device}")
+        self.policy.get_logger().info(
+            f"{ANSI_BLUE}FinalPolicy: YOLO device override: {self.device}{ANSI_RESET}"
+        )
         return True
 
     def _projection_data(self, observation) -> dict[str, Any] | None:
