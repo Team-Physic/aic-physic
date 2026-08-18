@@ -377,6 +377,7 @@ Engine::Engine(const rclcpp::NodeOptions& options)
   model_get_state_service_name_ = "/" + model_node_name_ + "/get_state";
   model_change_state_service_name_ = "/" + model_node_name_ + "/change_state";
   node_->declare_parameter("config_file_path", std::string(""));
+  node_->declare_parameter("num_trials", 0);
   node_->declare_parameter("endpoint_ready_timeout_seconds", 10);
   node_->declare_parameter("gripper_frame_name", std::string("gripper/tcp"));
   ground_truth_ = node_->declare_parameter("ground_truth", false);
@@ -478,6 +479,35 @@ EngineState Engine::initialize() {
     return engine_state_;
   }
 
+  std::size_t num_trials = 0;
+  const int num_trials_override = node_->get_parameter("num_trials").as_int();
+  if (num_trials_override < 0) {
+    RCLCPP_ERROR(node_->get_logger(),
+                 "num_trials must be 0 or a positive integer");
+    engine_state_ = EngineState::Error;
+    return engine_state_;
+  }
+  if (num_trials_override > 0) {
+    num_trials = static_cast<std::size_t>(num_trials_override);
+  } else if (config_["num_trials"]) {
+    num_trials = config_["num_trials"].as<std::size_t>();
+  }
+
+  if (num_trials > 0) {
+    const std::size_t configured_trials = config_["trials"].size();
+    if (num_trials < 1 || num_trials > configured_trials) {
+      RCLCPP_ERROR(node_->get_logger(),
+                   "num_trials must be between 1 and the number of configured "
+                   "trials (%zu)",
+                   configured_trials);
+      engine_state_ = EngineState::Error;
+      return engine_state_;
+    }
+    RCLCPP_INFO(node_->get_logger(),
+                "Trial limit: running the first %zu of %zu configured trial(s)",
+                num_trials, configured_trials);
+  }
+
   const YAML::Node nic_randomization =
       config_["randomization"]
           ? config_["randomization"]["nic_cards"]
@@ -495,8 +525,12 @@ EngineState Engine::initialize() {
                                     : std::random_device{}();
       std::mt19937 rng(seed);
       RCLCPP_INFO(node_->get_logger(), "NIC randomization seed: %u", seed);
+      std::size_t selected_trials = 0;
       for (auto it = config_["trials"].begin();
            it != config_["trials"].end(); ++it) {
+        if (num_trials > 0 && selected_trials >= num_trials) {
+          break;
+        }
         const std::string trial_id = it->first.as<std::string>();
         auto active_rails =
             randomize_nic_cards(it->second, rng, min_count, max_count);
@@ -507,6 +541,7 @@ EngineState Engine::initialize() {
         RCLCPP_INFO(node_->get_logger(),
                     "Trial '%s': randomized %zu NIC card(s), rails=[%s]",
                     trial_id.c_str(), active_rails.size(), rails.str().c_str());
+        ++selected_trials;
       }
     } catch (const std::exception& e) {
       RCLCPP_ERROR(node_->get_logger(), "Failed to randomize NIC cards: %s",
@@ -517,7 +552,11 @@ EngineState Engine::initialize() {
   }
 
   const auto& trials_config = config_["trials"];
+  std::size_t selected_trials = 0;
   for (auto it = trials_config.begin(); it != trials_config.end(); ++it) {
+    if (num_trials > 0 && selected_trials >= num_trials) {
+      break;
+    }
     const std::string trial_id = it->first.as<std::string>();
     const YAML::Node trial_config = it->second;
 
@@ -532,6 +571,7 @@ EngineState Engine::initialize() {
       engine_state_ = EngineState::Error;
       return engine_state_;
     }
+    ++selected_trials;
   }
 
   if (trials_.empty()) {
