@@ -672,7 +672,8 @@ def _follow(
     haptic_guard: HapticGuard | None = None,
     step_guard=None,
 ) -> bool:
-    """현재 TCP에서 목표 pose까지 S-curve 위치·자세 명령을 보낸다.
+    """
+    현재 TCP에서 목표 pose까지 S-curve 위치·자세 명령을 보낸다.
 
     ``step_guard``가 주어지면 각 waypoint 명령 직전에 호출한다. False를 반환하면
     해당 waypoint를 보내지 않고 현재 위치에서 경로를 중단한다.

@@ -95,6 +95,7 @@ def launch_setup(context, *args, **kwargs):
     start_aic_engine = LaunchConfiguration("start_aic_engine")
     shutdown_on_aic_engine_exit = LaunchConfiguration("shutdown_on_aic_engine_exit")
     aic_engine_config_file = LaunchConfiguration("aic_engine_config_file")
+    num_trials = LaunchConfiguration("num_trials")
     model_discovery_timeout_seconds = LaunchConfiguration(
         "model_discovery_timeout_seconds"
     )
@@ -248,6 +249,7 @@ def launch_setup(context, *args, **kwargs):
             {
                 "config_file_path": aic_engine_config_file,
                 "use_sim_time": True,
+                "num_trials": ParameterValue(num_trials, value_type=int),
                 "model_discovery_timeout_seconds": model_discovery_timeout_seconds,
                 "model_configure_timeout_seconds": model_configure_timeout_seconds,
             },
@@ -771,6 +773,14 @@ def generate_launch_description():
                 [FindPackageShare("aic_engine"), "config", "sample_config.yaml"]
             ),
             description="Absolute path to YAML file with the AIC engine configuration.",
+        )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "num_trials",
+            default_value="0",
+            description="Number of trials to run. 0 uses the value from the "
+            "engine YAML, or runs all configured trials when absent.",
         )
     )
     declared_arguments.append(

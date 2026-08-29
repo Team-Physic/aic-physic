@@ -11,7 +11,6 @@ from typing import Any, Callable
 import cv2
 import numpy as np
 
-from . import dataset
 from .geometry import transform_matrix
 
 
@@ -25,6 +24,8 @@ CAMERA_FRAMES = {
 CLASS_PATTERN = re.compile(r"^SFP_(\d+)(\d)$", re.IGNORECASE)
 VALID_RAILS = range(5)
 VALID_PORTS = range(2)
+ANSI_BLUE = "\033[1;34m"
+ANSI_RESET = "\033[0m"
 
 
 def _env_float(name: str, default: float) -> float:
@@ -36,6 +37,36 @@ def _env_float(name: str, default: float) -> float:
 
 def _stamp_ns(stamp) -> int:
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+
+
+def observation_stamp_ns(observation) -> int:
+    """Observation의 center image 촬영 시각을 nanosecond로 반환한다."""
+    if observation is None or observation.center_image is None:
+        return 0
+    return _stamp_ns(observation.center_image.header.stamp)
+
+
+def _image_for_camera(observation, camera: str):
+    return getattr(observation, f"{camera}_image")
+
+
+def _camera_info_for(observation, camera: str):
+    return getattr(observation, f"{camera}_camera_info")
+
+
+def _image_to_bgr(policy, message, camera: str) -> np.ndarray | None:
+    if message is None or message.width == 0 or message.height == 0:
+        return None
+    try:
+        image = np.frombuffer(message.data, dtype=np.uint8).reshape(
+            message.height, message.width, 3
+        )
+    except ValueError:
+        policy.get_logger().warn(f"FinalPolicy: invalid {camera} image buffer")
+        return None
+    if message.encoding == "rgb8":
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    return image.copy()
 
 
 @dataclass(frozen=True)
@@ -165,7 +196,7 @@ def track_keypoints(
     valid = status_forward[:, 0].astype(bool) & status_backward[:, 0].astype(bool)
     errors = np.linalg.norm(points[:, 0] - backward[:, 0], axis=1)
     valid &= np.isfinite(errors) & (errors <= forward_backward_max_px)
-    if int(np.count_nonzero(valid)) < 3:
+    if int(np.count_nonzero(valid)) != len(points):
         return None
     return current[:, 0][valid], float(np.sqrt(np.mean(np.square(errors[valid]))))
 
@@ -187,16 +218,16 @@ class PortVision:
         self.target = target
         self.model = model
         self.debug_image_callback = debug_image_callback
+        self._device_logged = False
         self.confidence = _env_float("AIC_YOLO_CONFIDENCE", 0.8)
         self.keypoint_confidence = _env_float("AIC_YOLO_KEYPOINT_CONFIDENCE", 0.25)
-        self.device = os.environ.get("AIC_YOLO_DEVICE", "cpu").strip() or "cpu"
+        self.device = os.environ.get("AIC_YOLO_DEVICE", "").strip() or None
         self.sync_max_ns = int(
             _env_float("AIC_TRIANGULATION_SYNC_THRESHOLD_MS", 1.0) * 1_000_000
         )
         self.reprojection_max_px = _env_float(
             "AIC_TRIANGULATION_REPROJECTION_MAX_PX", 30.0
         )
-        self.flow_max_px = _env_float("AIC_TRACK_FLOW_MAX_ERROR_PX", 20.0)
         self.forward_backward_max_px = _env_float(
             "AIC_TRACK_FORWARD_BACKWARD_MAX_PX", 2.0
         )
@@ -235,12 +266,15 @@ class PortVision:
         except Exception as exc:
             self.policy.get_logger().error(f"FinalPolicy: YOLO load failed: {exc}")
             return False
-        self.policy.get_logger().info(f"FinalPolicy: YOLO device override: {self.device}")
+        self.policy.get_logger().info(
+            f"{ANSI_BLUE}FinalPolicy: YOLO requested device: "
+            f"{self.device or 'auto'}{ANSI_RESET}"
+        )
         return True
 
     def _projection_data(self, observation) -> dict[str, Any] | None:
         image_messages = {
-            camera: dataset.image_for_camera(observation, camera)
+            camera: _image_for_camera(observation, camera)
             for camera in CAMERAS
         }
         stamps = {
@@ -258,10 +292,8 @@ class PortVision:
         transforms: dict[str, np.ndarray] = {}
         camera_origins: dict[str, np.ndarray] = {}
         for camera in CAMERAS:
-            image = dataset.image_to_bgr(
-                self.policy, image_messages[camera], camera
-            )
-            camera_info = dataset.camera_info_for(observation, camera)
+            image = _image_to_bgr(self.policy, image_messages[camera], camera)
+            camera_info = _camera_info_for(observation, camera)
             if image is None or camera_info is None or len(camera_info.k) < 9:
                 return None
             intrinsic = np.asarray(camera_info.k, dtype=float).reshape(3, 3)
@@ -311,12 +343,22 @@ class PortVision:
             return {camera: [] for camera in CAMERAS}
         source = [images[camera] for camera in CAMERAS]
         predict = getattr(self.model, "predict", self.model)
-        results = predict(
-            source=source,
-            conf=self.confidence,
-            device=self.device,
-            verbose=False,
-        )
+        arguments = {
+            "source": source,
+            "conf": self.confidence,
+            "verbose": False,
+        }
+        if self.device is not None:
+            arguments["device"] = self.device
+        results = predict(**arguments)
+        if not self._device_logged:
+            predictor = getattr(self.model, "predictor", None)
+            selected = getattr(predictor, "device", self.device or "auto")
+            self.policy.get_logger().info(
+                f"{ANSI_BLUE}FinalPolicy: YOLO selected device: "
+                f"{selected}{ANSI_RESET}"
+            )
+            self._device_logged = True
         detections = {camera: [] for camera in CAMERAS}
         for camera, result in zip(CAMERAS, results):
             if self.debug_image_callback is not None:
@@ -463,7 +505,7 @@ class PortVision:
         return candidates[0] if candidates else None
 
     def track(self, observation, previous: PortEstimate) -> PortEstimate | None:
-        """Optical flow와 exact-class detection으로 target lock을 갱신한다."""
+        """YOLO 호출 없이 optical flow로 직전 target keypoint를 갱신한다."""
         if observation is None:
             return None
         try:
@@ -472,11 +514,8 @@ class PortVision:
             return None
         if data is None or data["stamp_ns"] <= previous.stamp_ns:
             return None
-        current_detections = self._detect(data["images"], data["headers"])
         selected: dict[str, list[dict[str, Any]]] = {}
         for camera, previous_detection in previous.detections.items():
-            if not current_detections.get(camera):
-                continue
             previous_gray = cv2.cvtColor(previous.images[camera], cv2.COLOR_BGR2GRAY)
             current_gray = cv2.cvtColor(data["images"][camera], cv2.COLOR_BGR2GRAY)
             tracked = track_keypoints(
@@ -489,19 +528,18 @@ class PortVision:
                 continue
             tracked_points, _ = tracked
             flow_center = np.mean(tracked_points, axis=0)
-            current = min(
-                current_detections[camera],
-                key=lambda detection: float(np.linalg.norm(detection["uv"] - flow_center)),
-            )
-            flow_error = float(np.linalg.norm(current["uv"] - flow_center))
             projected = project_point(data["projections"][camera], previous.xyz)
-            projection_error = float(np.linalg.norm(current["uv"] - projected))
-            if (
-                flow_error > self.flow_max_px
-                or projection_error > self.track_reprojection_max_px
-            ):
+            projection_error = float(np.linalg.norm(flow_center - projected))
+            if projection_error > self.track_reprojection_max_px:
                 continue
-            selected[camera] = [current]
+            selected[camera] = [
+                {
+                    "class_name": previous.class_name,
+                    "confidence": previous_detection.get("confidence", 1.0),
+                    "keypoints": tracked_points,
+                    "uv": flow_center,
+                }
+            ]
         if len(selected) < 2:
             return None
         candidates = self._estimate_candidates(data, selected)

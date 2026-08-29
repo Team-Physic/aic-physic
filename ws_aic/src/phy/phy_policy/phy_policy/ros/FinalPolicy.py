@@ -21,10 +21,13 @@ from sensor_msgs.msg import Image
 
 from . import motion
 from .final_policy_vision import (
+    ANSI_BLUE,
+    ANSI_RESET,
     CAMERAS,
     PortEstimate,
     PortVision,
     TargetSpec,
+    observation_stamp_ns,
     target_from_task,
 )
 
@@ -32,6 +35,7 @@ from .final_policy_vision import (
 DEBUG_IMAGE_TOPICS = {
     camera: f"/final_policy/yolo/{camera}/image" for camera in CAMERAS
 }
+ANSI_GREEN = "\033[1;32m"
 
 
 def _env_float(name: str, default: float) -> float:
@@ -46,6 +50,15 @@ def _env_int(name: str, default: int) -> int:
         return int(os.environ.get(name, default))
     except ValueError:
         return default
+
+
+def _matches_locked_target(
+    locked: PortEstimate, candidate: PortEstimate, radius_m: float
+) -> bool:
+    return (
+        candidate.class_name == locked.class_name
+        and float(np.linalg.norm(candidate.xyz - locked.xyz)) <= radius_m
+    )
 
 
 class FinalPolicy(Policy):
@@ -75,6 +88,11 @@ class FinalPolicy(Policy):
         self.track_max_misses = max(1, _env_int("AIC_TRACK_MAX_MISSES", 3))
         self.track_reacquire_hits = max(1, _env_int("AIC_TRACK_REACQUIRE_HITS", 2))
         self.track_retry_s = max(0.0, _env_float("AIC_TRACK_RETRY_S", 0.05))
+        self.target_lock_hits = max(1, _env_int("AIC_TARGET_LOCK_HITS", 5))
+        self.target_lock_radius_m = max(
+            0.0, _env_float("AIC_TARGET_LOCK_RADIUS_M", 0.010)
+        )
+        self._background_yolo_misses = 0
         self._estimate: PortEstimate | None = None
         self._target: TargetSpec | None = None
         self._publisher = parent_node.create_publisher(
@@ -127,26 +145,20 @@ class FinalPolicy(Policy):
             timeout=Duration(seconds=self.sync_wait_timeout_s),
         )
 
-    def _publish_estimate(self, estimate: PortEstimate, label: str) -> None:
+    def _publish_estimate(
+        self, estimate: PortEstimate, label: str, color: str = ""
+    ) -> None:
         message = PointStamped()
         message.header.frame_id = "base_link"
         message.header.stamp = estimate.stamp
         message.point.x, message.point.y, message.point.z = map(float, estimate.xyz)
         self._publisher.publish(message)
         self.get_logger().info(
-            f"[FinalPolicy] {label}: class={estimate.class_name}, "
+            f"{color}[FinalPolicy] {label}: class={estimate.class_name}, "
             f"xyz=({estimate.xyz[0]:+.4f}, {estimate.xyz[1]:+.4f}, "
-            f"{estimate.xyz[2]:+.4f}), reproj={estimate.reprojection_rms_px:.2f}px"
+            f"{estimate.xyz[2]:+.4f}), "
+            f"reproj={estimate.reprojection_rms_px:.2f}px{ANSI_RESET}"
         )
-
-    @staticmethod
-    def _completed_estimate(future: Future | None) -> PortEstimate | None:
-        if future is None or not future.done():
-            return None
-        try:
-            return future.result()
-        except Exception:
-            return None
 
     def _stage_lift_up_detect(
         self,
@@ -154,7 +166,7 @@ class FinalPolicy(Policy):
         get_observation: GetObservationCallback,
         move_robot: MoveRobotCallback,
     ) -> bool:
-        """기존 lift profile 동안 비동기 target detection을 수행한다."""
+        """Lift와 YOLO를 병행하고 가까운 3D 검출을 반복해 target을 고정한다."""
         observation = get_observation()
         start = motion._tcp_pose(observation)
         if start is None:
@@ -164,23 +176,53 @@ class FinalPolicy(Policy):
         target_pose.position.z += motion.LIFT_M
         estimate: PortEstimate | None = None
         future: Future | None = None
+        confirmations: list[PortEstimate] = []
 
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="final-policy-yolo") as pool:
-            if observation is not None:
-                future = pool.submit(vision.estimate, observation)
+            def submit_latest() -> None:
+                nonlocal future
+                current = get_observation()
+                if current is not None:
+                    future = pool.submit(vision.estimate, current)
+
+            def accept(candidate: PortEstimate | None) -> None:
+                nonlocal estimate
+                if candidate is None:
+                    return
+                if confirmations and candidate.stamp_ns <= confirmations[-1].stamp_ns:
+                    return
+                if confirmations:
+                    center = np.median(
+                        np.asarray([item.xyz for item in confirmations]), axis=0
+                    )
+                    if (
+                        candidate.class_name != confirmations[-1].class_name
+                        or float(np.linalg.norm(candidate.xyz - center))
+                        > self.target_lock_radius_m
+                    ):
+                        confirmations.clear()
+                confirmations.append(candidate)
+                self._publish_estimate(
+                    candidate,
+                    f"target confirmation {len(confirmations)}/"
+                    f"{self.target_lock_hits}",
+                )
+                if len(confirmations) >= self.target_lock_hits:
+                    estimate = candidate
+
+            submit_latest()
 
             def detect_guard(_index, _pose) -> bool:
-                nonlocal estimate, future
-                completed = self._completed_estimate(future)
-                if completed is not None:
-                    estimate = completed
-                    return False
-                if future is not None and future.done():
-                    future = None
-                if future is None:
-                    current = get_observation()
-                    if current is not None:
-                        future = pool.submit(vision.estimate, current)
+                nonlocal future
+                if estimate is not None or future is None or not future.done():
+                    return True
+                try:
+                    accept(future.result())
+                except Exception as exc:
+                    self.get_logger().warn(f"FinalPolicy: lift YOLO failed: {exc}")
+                future = None
+                if estimate is None:
+                    submit_latest()
                 return True
 
             motion._follow(
@@ -195,21 +237,26 @@ class FinalPolicy(Policy):
                 motion.LIFT_DAMPING,
                 step_guard=detect_guard,
             )
-            if estimate is None and future is not None:
+            for _ in range(self.vision_retries):
+                if estimate is not None:
+                    break
+                if future is None:
+                    submit_latest()
+                if future is None:
+                    self.sleep_for(self.vision_retry_s)
+                    continue
                 try:
-                    estimate = future.result()
+                    accept(future.result())
                 except Exception as exc:
                     self.get_logger().warn(f"FinalPolicy: lift YOLO failed: {exc}")
+                future = None
+                if estimate is None:
+                    self.sleep_for(self.vision_retry_s)
 
-        for _ in range(self.vision_retries):
-            if estimate is not None:
-                break
-            estimate = vision.estimate(get_observation())
-            if estimate is None:
-                self.sleep_for(self.vision_retry_s)
         if estimate is None:
             self.get_logger().error(
-                f"FinalPolicy: target {vision.target.class_name} was not triangulated"
+                f"FinalPolicy: target {vision.target.class_name} did not produce "
+                f"{self.target_lock_hits} consistent detections"
             )
             return False
         self._estimate = estimate
@@ -217,47 +264,107 @@ class FinalPolicy(Policy):
         self.sleep_for(motion.LIFT_SETTLE_S)
         return True
 
+    def _recover_target(
+        self,
+        locked: PortEstimate,
+        poll_yolo,
+        get_observation: GetObservationCallback,
+        index: int,
+    ) -> bool:
+        """정지 이후 촬영된 연속 YOLO 결과만으로 target lock을 복구한다."""
+        recovery_min_stamp_ns = observation_stamp_ns(get_observation())
+        hits = 0
+        previous_stamp_ns = recovery_min_stamp_ns - 1
+        provisional: PortEstimate | None = None
+        for _ in range(self.vision_retries):
+            ready, candidate = poll_yolo(True)
+            if (
+                ready
+                and candidate is not None
+                and candidate.stamp_ns > recovery_min_stamp_ns
+                and candidate.stamp_ns > previous_stamp_ns
+                and _matches_locked_target(
+                    locked, candidate, self.target_lock_radius_m
+                )
+            ):
+                hits += 1
+                previous_stamp_ns = candidate.stamp_ns
+                provisional = candidate
+                if hits >= self.track_reacquire_hits:
+                    self._background_yolo_misses = 0
+                    self._estimate = provisional
+                    self._publish_estimate(
+                        provisional,
+                        f"track reacquired waypoint={index + 1}",
+                        ANSI_GREEN,
+                    )
+                    return True
+            else:
+                hits = 0
+            if hits < self.track_reacquire_hits:
+                self.sleep_for(self.vision_retry_s)
+        self.get_logger().error(
+            f"FinalPolicy: target recovery failed at approach waypoint {index + 1}; hold"
+        )
+        return False
+
     def _track_guard(
         self,
         vision: PortVision,
         get_observation: GetObservationCallback,
+        locked: PortEstimate,
+        poll_yolo,
         index: int,
     ) -> bool:
-        """같은 class와 keypoint track을 검사해 새 motion command를 허용한다."""
+        """KLT를 즉시 검사하고 background YOLO 불일치 시 이동을 보류한다."""
         if self._estimate is None:
             return False
-        previous = self._estimate
-        reacquire_hits = 0
-        provisional = previous
         for _ in range(self.track_max_misses):
+            ready, yolo_estimate = poll_yolo(False)
             observation = get_observation()
-            tracked = vision.track(observation, provisional)
-            if tracked is not None:
-                self._estimate = tracked
-                self._publish_estimate(tracked, f"track waypoint={index + 1}")
-                return True
-            reacquired = vision.estimate(observation)
-            if (
-                reacquired is not None
-                and reacquired.stamp_ns > provisional.stamp_ns
-                and float(np.linalg.norm(reacquired.xyz - previous.xyz))
-                <= vision.track_max_3d_jump_m
-            ):
-                provisional = reacquired
-                reacquire_hits += 1
-                if reacquire_hits >= self.track_reacquire_hits:
-                    self._estimate = provisional
-                    self._publish_estimate(
-                        provisional, f"track reacquired waypoint={index + 1}"
+            if ready:
+                if yolo_estimate is None:
+                    self._background_yolo_misses += 1
+                elif not _matches_locked_target(
+                    locked, yolo_estimate, self.target_lock_radius_m
+                ):
+                    return self._recover_target(
+                        locked, poll_yolo, get_observation, index
                     )
-                    return True
-            else:
-                reacquire_hits = 0
+                else:
+                    self._background_yolo_misses = 0
+                    current_stamp_ns = observation_stamp_ns(observation)
+                    if yolo_estimate.stamp_ns == current_stamp_ns:
+                        reanchored = yolo_estimate
+                    elif yolo_estimate.stamp_ns < current_stamp_ns:
+                        reanchored = vision.track(observation, yolo_estimate)
+                    else:
+                        reanchored = None
+                    if reanchored is not None and _matches_locked_target(
+                        locked, reanchored, self.target_lock_radius_m
+                    ):
+                        self._estimate = reanchored
+                        self._publish_estimate(
+                            reanchored,
+                            f"YOLO re-anchor waypoint={index + 1}",
+                            ANSI_GREEN,
+                        )
+                        return True
+                if self._background_yolo_misses >= self.track_max_misses:
+                    return self._recover_target(
+                        locked, poll_yolo, get_observation, index
+                    )
+            tracked = vision.track(observation, self._estimate)
+            if tracked is not None and _matches_locked_target(
+                locked, tracked, self.target_lock_radius_m
+            ):
+                self._estimate = tracked
+                self._publish_estimate(
+                    tracked, f"track waypoint={index + 1}", ANSI_GREEN
+                )
+                return True
             self.sleep_for(self.track_retry_s)
-        self.get_logger().error(
-            f"FinalPolicy: target track lost at approach waypoint {index + 1}; hold"
-        )
-        return False
+        return self._recover_target(locked, poll_yolo, get_observation, index)
 
     def _stage_approach(
         self,
@@ -271,11 +378,9 @@ class FinalPolicy(Policy):
         if start is None or self._estimate is None:
             self.get_logger().error("FinalPolicy: approach missing TCP or target pose")
             return False
-        target_xyz = (
-            self._estimate.xyz
-            + self.stand_off_m * self._estimate.normal
-            + self.tcp_offset
-        )
+        locked = self._estimate
+        self._background_yolo_misses = 0
+        target_xyz = locked.xyz + self.stand_off_m * locked.normal + self.tcp_offset
         start_xyz = np.array(
             [start.position.x, start.position.y, start.position.z], dtype=float
         )
@@ -298,20 +403,50 @@ class FinalPolicy(Policy):
             f"target=({target_xyz[0]:+.4f}, {target_xyz[1]:+.4f}, "
             f"{target_xyz[2]:+.4f})"
         )
-        completed = motion._follow(
-            self,
-            move_robot,
-            start,
-            target_pose,
-            motion.APPROACH_STEPS,
-            motion.APPROACH_DT,
-            "approach",
-            motion.APPROACH_STIFFNESS,
-            motion.APPROACH_DAMPING,
-            step_guard=lambda index, _pose: self._track_guard(
-                vision, get_observation, index
-            ),
-        )
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="final-policy-yolo")
+        future: Future | None = None
+
+        def submit_latest() -> None:
+            nonlocal future
+            observation = get_observation()
+            if observation is not None:
+                future = pool.submit(vision.estimate, observation)
+
+        def poll_yolo(wait: bool) -> tuple[bool, PortEstimate | None]:
+            nonlocal future
+            if future is None:
+                submit_latest()
+            if future is None or (not wait and not future.done()):
+                return False, None
+            try:
+                result = future.result()
+            except Exception as exc:
+                self.get_logger().warn(f"FinalPolicy: background YOLO failed: {exc}")
+                result = None
+            future = None
+            submit_latest()
+            return True, result
+
+        submit_latest()
+        try:
+            completed = motion._follow(
+                self,
+                move_robot,
+                start,
+                target_pose,
+                motion.APPROACH_STEPS,
+                motion.APPROACH_DT,
+                "approach",
+                motion.APPROACH_STIFFNESS,
+                motion.APPROACH_DAMPING,
+                step_guard=lambda index, _pose: self._track_guard(
+                    vision, get_observation, locked, poll_yolo, index
+                ),
+            )
+        finally:
+            if future is not None:
+                future.cancel()
+            pool.shutdown(wait=True, cancel_futures=True)
         if not completed:
             return False
         self.sleep_for(motion.APPROACH_SETTLE_S)
@@ -337,9 +472,9 @@ class FinalPolicy(Policy):
             debug_image_callback=self._publish_yolo_debug,
         )
         self.get_logger().info(
-            f"[FinalPolicy] target: type={self._target.port_type}, "
+            f"{ANSI_BLUE}[FinalPolicy] target: type={self._target.port_type}, "
             f"rail={self._target.rail_index}, port={self._target.port_index}, "
-            f"class={self._target.class_name}"
+            f"class={self._target.class_name}{ANSI_RESET}"
         )
         if not vision.load_model():
             return False

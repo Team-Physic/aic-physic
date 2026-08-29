@@ -48,6 +48,23 @@ Each trial is executed sequentially:
 4. Clean up (remove spawned entities)
 5. Move to next trial or complete
 
+By default, every trial under the `trials` map is executed in order. To limit the number of trials, add a top-level `num_trials` value:
+
+```yaml
+num_trials: 2
+trials:
+  trial_1:
+    # ...
+  trial_2:
+    # ...
+  trial_3:
+    # ...
+```
+
+This runs only the first `num_trials` entries. The value must be between `1` and the number of configured trials.
+
+The engine also exposes a ROS parameter with the same name. A positive ROS parameter value overrides the YAML value; `0` falls back to the YAML value and, if the YAML value is absent, runs all trials.
+
 ## Usage
 
 ### Running the Engine
@@ -68,6 +85,7 @@ ros2 run aic_engine aic_engine --ros-args \
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `config_file_path` | string | "" | **Required**. Path to the trial configuration YAML file |
+| `num_trials` | int | 0 | Number of trials to run. `0` uses the YAML `num_trials` value, or all configured trials when the YAML value is absent |
 | `model_node_name` | string | "aic_model" | Name of the participant's lifecycle node |
 | `adapter_node_name` | string | "aic_adapter_node" | Name of the adapter node (future use) |
 | `gripper_frame_name` | string | "gripper/tcp" | Name of the gripper frame |

@@ -56,6 +56,7 @@ pyqt = ">=5.15,<6"
 pyyaml = ">=6,<7"
 ros-kilted-phy-data-collection = { path = "phy/phy_data_collection" }
 ros-kilted-phy-dashboard = { path = "phy/phy_dashboard/package.xml" }
+ros-kilted-phy-policy = { path = "phy/phy_policy" }
 ros-kilted-ros2bag = "*"
 ros-kilted-rosbag2-storage-sqlite3 = "*"
 
