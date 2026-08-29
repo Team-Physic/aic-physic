@@ -512,7 +512,7 @@ EngineState Engine::initialize() {
       config_["randomization"]
           ? config_["randomization"]["nic_cards"]
           : YAML::Node();
-  if (nic_randomization) {
+  if (nic_randomization.IsMap()) {
     try {
       const int min_count = nic_randomization["min_count"].as<int>();
       const int max_count = nic_randomization["max_count"].as<int>();
