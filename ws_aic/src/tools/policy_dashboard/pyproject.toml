@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=71"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "policy-dashboard"
+version = "0.1.0"
+description = "Browser dashboard for FinalPolicy ROS debug topics"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Team Physic", email = "34768271+whyz-dev@users.noreply.github.com" },
+]
+license = { text = "Proprietary" }
+dependencies = [
+    "aiohttp>=3.11,<4",
+    "numpy>=1.25,<3",
+    "opencv-python-headless>=4.8,<5",
+]
+
+[project.scripts]
+policy-dashboard = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["controllers*", "models*", "views*"]
+
+[tool.setuptools.package-data]
+views = ["static/*.html", "static/*.css", "static/*.js"]
