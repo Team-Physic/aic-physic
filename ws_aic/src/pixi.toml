@@ -9,7 +9,7 @@ conda-pypi-map = { "robostack-kilted" = "aic/robostack_mapping.json", "conda-for
 
 [tasks]
 view_annotations = "python tools/bounding_box_tool/main.py"
-phy_dashboard = "ros2 run phy_dashboard phy_dashboard"
+policy_dashboard = "python tools/policy_dashboard/main.py"
 
 [target.linux-64.dependencies]
 evdev = ">=1.9.2,<2"
@@ -42,6 +42,7 @@ setuptools = ">=71.0.0,<81.0.0"                                                 
 ros-kilted-rosbag2-storage-mcap = ">=0.32.0,<0.33"
 
 [pypi-dependencies]
+aiohttp = ">=3.11,<4"
 huggingface-hub = { version = "~=1.7" }
 lerobot = "==0.5.1"
 lerobot_robot_ros = { git = "https://github.com/koonpeng/lerobot-ros", rev = "87708d0ae14a724bca78f8ae9d55448332509a57", subdirectory = "lerobot_robot_ros" }
@@ -55,7 +56,6 @@ ultralytics = ">=8.3,<9"
 pyqt = ">=5.15,<6"
 pyyaml = ">=6,<7"
 ros-kilted-phy-data-collection = { path = "phy/phy_data_collection" }
-ros-kilted-phy-dashboard = { path = "phy/phy_dashboard/package.xml" }
 ros-kilted-phy-policy = { path = "phy/phy_policy" }
 ros-kilted-ros2bag = "*"
 ros-kilted-rosbag2-storage-sqlite3 = "*"
