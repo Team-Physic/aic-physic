@@ -8,7 +8,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from bounding_box_tool.dataset import PoseAnnotation
+from models.dataset import PoseAnnotation
 
 ROBOT_ARM_DARK_THRESHOLD = 40
 ROBOT_ARM_MIN_AREA_RATIO = 0.01

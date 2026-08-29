@@ -1,4 +1,4 @@
-"""YOLO-pose dataset discovery, parsing, and saving."""
+"""Dataset model for YOLO-pose discovery, parsing, and saving."""
 
 from __future__ import annotations
 
