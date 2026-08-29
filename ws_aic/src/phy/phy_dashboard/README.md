@@ -29,8 +29,10 @@ ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/localhost:7610"];transport/shared
 PIXI_FROZEN=true pixi run phy_dashboard
 ```
 
-최종 policy 실행에는 GPU 추론을 권장한다.
+FinalPolicy는 기본적으로 Ultralytics가 사용 가능한 device를 자동 선택한다. 현재 GTX 1050에서는 `cuda:0`이 선택되며 첫 추론 뒤 `YOLO selected device: cuda:0` 로그로 확인할 수 있다. GPU 또는 CPU를 강제로 지정할 때만 다음 환경변수를 사용한다.
 
 ```bash
 export AIC_YOLO_DEVICE=0
+# 또는 CPU 강제 실행
+export AIC_YOLO_DEVICE=cpu
 ```
