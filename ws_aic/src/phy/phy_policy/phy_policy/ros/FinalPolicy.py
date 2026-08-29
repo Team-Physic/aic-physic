@@ -15,7 +15,12 @@ from aic_model.policy import (
 from aic_task_interfaces.msg import Task
 from geometry_msgs.msg import PointStamped
 from rclpy.duration import Duration
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from rclpy.time import Time
 from sensor_msgs.msg import Image
 
@@ -35,6 +40,7 @@ from .final_policy_vision import (
 DEBUG_IMAGE_TOPICS = {
     camera: f"/final_policy/yolo/{camera}/image" for camera in CAMERAS
 }
+TASK_TOPIC = "/final_policy/task"
 ANSI_GREEN = "\033[1;32m"
 
 
@@ -97,6 +103,14 @@ class FinalPolicy(Policy):
         self._target: TargetSpec | None = None
         self._publisher = parent_node.create_publisher(
             PointStamped, "/final_policy/triangulated_port_xyz", 10
+        )
+        task_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._task_publisher = parent_node.create_publisher(
+            Task, TASK_TOPIC, task_qos
         )
         self._debug_image_publishers = {
             camera: parent_node.create_publisher(
@@ -465,6 +479,7 @@ class FinalPolicy(Policy):
         except ValueError as exc:
             self.get_logger().error(f"FinalPolicy: invalid task: {exc}")
             return False
+        self._task_publisher.publish(task)
         self._estimate = None
         vision = PortVision(
             self,
