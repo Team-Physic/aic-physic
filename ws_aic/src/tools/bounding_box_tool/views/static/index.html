@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#121718">
+    <title>AIC Bounding Box Tool</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-15v-13Z"/><path d="M3.5 10.5h17"/></symbol>
+      <symbol id="icon-save" viewBox="0 0 24 24"><path d="M5 4.5h12l2 2v13H5z"/><path d="M8 4.5v6h8v-6M8 19v-5h8v5"/></symbol>
+      <symbol id="icon-undo" viewBox="0 0 24 24"><path d="m8 7-4 4 4 4"/><path d="M5 11h8a6 6 0 0 1 6 6"/></symbol>
+      <symbol id="icon-add-box" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M5 7h14M9 7V4.5h6V7M7 7l1 13h8l1-13M10 11v5M14 11v5"/></symbol>
+      <symbol id="icon-image-x" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 4-4 3 3 2-2M15.5 15.5l4 4M19.5 15.5l-4 4"/></symbol>
+      <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+      <symbol id="icon-chevron-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+      <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+      <symbol id="icon-minus" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></symbol>
+      <symbol id="icon-fit" viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></symbol>
+      <symbol id="icon-images" viewBox="0 0 24 24"><rect x="5" y="5" width="15" height="15" rx="2"/><path d="M5 16l4-4 3 3 2-2 6 6M8 5V3h13v13h-1"/></symbol>
+      <symbol id="icon-box" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 5v14M16 5v14"/></symbol>
+    </svg>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">AIC</span>
+          <div><h1>Bounding Box Tool</h1><small>YOLO POSE · WEB EDITOR</small></div>
+        </div>
+        <form id="open-form" class="path-form">
+          <label class="sr-only" for="dataset-path">Dataset 경로</label>
+          <div class="input-with-icon">
+            <svg class="icon"><use href="#icon-folder"/></svg>
+            <input id="dataset-path" name="path" type="text" autocomplete="off"
+                   placeholder="Dataset root 또는 images 경로">
+          </div>
+          <button type="submit" class="primary"><svg class="icon"><use href="#icon-folder"/></svg>Open</button>
+        </form>
+        <div class="save-state" id="save-state" data-state="idle">
+          <span></span><strong>NO DATASET</strong>
+        </div>
+      </header>
+
+      <nav class="toolbar" aria-label="편집 도구">
+        <div class="tool-group">
+          <button id="save-button" class="primary" title="Save (Ctrl+S)"><svg class="icon"><use href="#icon-save"/></svg>Save</button>
+          <button id="undo-button" title="Undo (Ctrl+Z)"><svg class="icon"><use href="#icon-undo"/></svg>Undo</button>
+        </div>
+        <div class="tool-group">
+          <button id="add-button" title="Add Box (W)"><svg class="icon"><use href="#icon-add-box"/></svg>Add Box</button>
+          <button id="delete-button" class="danger" title="Delete Object (Delete)"><svg class="icon"><use href="#icon-trash"/></svg>Delete</button>
+          <button id="delete-sample-button" class="danger quiet" title="Delete Image + Label (Ctrl+D)"><svg class="icon"><use href="#icon-image-x"/></svg>Delete Sample</button>
+          <button id="visibility-button" title="Auto Visibility (V)"><svg class="icon"><use href="#icon-eye"/></svg>Visibility</button>
+        </div>
+        <div class="tool-group navigation">
+          <button id="previous-button" class="icon-button" aria-label="이전 이미지" title="Previous (A / Left)"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+          <span id="image-position">0 / 0</span>
+          <button id="next-button" class="icon-button" aria-label="다음 이미지" title="Next (D / Right)"><svg class="icon"><use href="#icon-chevron-right"/></svg></button>
+        </div>
+        <div class="tool-group view-tools">
+          <button id="zoom-out-button" class="icon-button" aria-label="축소" title="Zoom out"><svg class="icon"><use href="#icon-minus"/></svg></button>
+          <button id="fit-button" title="Fit (F)"><svg class="icon"><use href="#icon-fit"/></svg>Fit</button>
+          <button id="zoom-in-button" class="icon-button" aria-label="확대" title="Zoom in"><svg class="icon"><use href="#icon-plus"/></svg></button>
+          <label class="toggle"><input id="overlay-toggle" type="checkbox" checked><span></span>Overlay</label>
+        </div>
+      </nav>
+
+      <main class="workspace">
+        <aside class="panel image-panel">
+          <header><div class="panel-title"><svg class="icon"><use href="#icon-images"/></svg><div><small>DATASET</small><h2>Images</h2></div></div><span id="image-count">0</span></header>
+          <div class="search-wrap">
+            <svg class="icon"><use href="#icon-search"/></svg>
+            <input id="image-search" type="search" placeholder="파일 이름 검색" autocomplete="off">
+          </div>
+          <ol id="image-list" class="item-list"></ol>
+          <div id="dataset-empty" class="empty-panel">
+            <strong>Dataset을 여세요</strong>
+            <span>상단 입력란에 서버에서 접근 가능한 경로를 입력합니다.</span>
+          </div>
+        </aside>
+
+        <section class="canvas-column">
+          <div id="canvas-wrap" class="canvas-wrap" tabindex="0">
+            <canvas id="editor-canvas"></canvas>
+            <div id="canvas-empty" class="canvas-empty">
+              <span class="empty-glyph">⌗</span>
+              <strong>No image loaded</strong>
+              <small>Open a dataset to begin</small>
+            </div>
+            <div id="busy" class="busy" hidden><span></span>Loading</div>
+          </div>
+          <footer class="statusbar">
+            <span id="status-message">Ready</span>
+            <span id="image-meta">—</span>
+          </footer>
+        </section>
+
+        <aside class="panel inspector-panel">
+          <section class="objects-section">
+            <header><div class="panel-title"><svg class="icon"><use href="#icon-box"/></svg><div><small>ANNOTATION</small><h2>Objects</h2></div></div><span id="object-count">0</span></header>
+            <ol id="object-list" class="item-list object-list"></ol>
+          </section>
+          <section id="inspector" class="inspector" hidden>
+            <div class="section-heading"><small>SELECTED OBJECT</small><strong id="selected-object">Object</strong></div>
+            <label>Class
+              <select id="class-select"></select>
+            </label>
+            <div class="coords" id="bbox-values"></div>
+            <div class="keypoints-heading"><span>Keypoints</span><small>visibility</small></div>
+            <div id="keypoint-controls" class="keypoint-controls"></div>
+          </section>
+          <section class="warnings-section">
+            <div class="section-heading"><small>WARNINGS</small><span id="warning-count">0</span></div>
+            <div id="warnings" class="warnings">No warnings</div>
+          </section>
+          <section class="help-section">
+            <details>
+              <summary>Shortcuts &amp; controls</summary>
+              <p>Drag box/keypoint to edit. Drag a corner to resize. Shift-drag selects a range. Wheel zooms; drag empty canvas to pan.</p>
+              <dl><dt>W</dt><dd>Add box</dd><dt>E</dt><dd>Class</dd><dt>A / D</dt><dd>Previous / next</dd><dt>F</dt><dd>Fit image</dd></dl>
+            </details>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <dialog id="class-dialog">
+      <form method="dialog" class="dialog-card">
+        <small>OBJECT CLASS</small>
+        <h2>Class 선택</h2>
+        <label>Class<select id="dialog-class-select"></select></label>
+        <label id="custom-class-wrap" hidden>Class ID<input id="custom-class-id" type="number" min="0" max="9999" value="0"></label>
+        <div class="dialog-actions"><button value="cancel">Cancel</button><button value="confirm" class="primary">Apply</button></div>
+      </form>
+    </dialog>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  </body>
+</html>

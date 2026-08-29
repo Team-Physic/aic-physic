@@ -8,7 +8,7 @@ preview = ["pixi-build"]
 conda-pypi-map = { "robostack-kilted" = "aic/robostack_mapping.json", "conda-forge" = "conda_pypi_mapping.json" }
 
 [tasks]
-view_annotations = "PYTHONPATH=tools/bounding_box_tool python -m bounding_box_tool.main"
+view_annotations = "python tools/bounding_box_tool/main.py"
 phy_dashboard = "ros2 run phy_dashboard phy_dashboard"
 
 [target.linux-64.dependencies]
