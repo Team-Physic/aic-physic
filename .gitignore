@@ -17,6 +17,7 @@ env/
 ws_aic/src/phy/phy_data_collection/files.txt
 ws_aic/src/phy/phy_dashboard/files.txt
 ws_aic/src/phy/phy_policy/files.txt
+ws_aic/results/*
 
 # Editor settings
 **/.vscode/
@@ -29,6 +30,7 @@ ws_aic/src/phy/phy_policy/files.txt
 **/debug/
 **/rosbags/
 paper/
+/docs/learn/
 
 # ROS workspace artifacts and local datasets
 ws_aic/data/

@@ -118,8 +118,8 @@ docker exec -it \
   source /ws_aic/install/setup.bash
   source /home/swlinux/Desktop/workspace/aic-physic/ws_aic/install/setup.bash
   exec /home/swlinux/Desktop/workspace/aic-physic/scripts/run-aic-eval.sh \
-    --seed 0 \
-    --num-trials 2 \
+    --seed 1 \
+    --num-trials 4 \
     -- \
     ground_truth:=true \
     start_aic_engine:=true \
