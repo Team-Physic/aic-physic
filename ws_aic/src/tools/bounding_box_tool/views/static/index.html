@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#121718">
+    <meta name="theme-color" content="#0f1115">
     <title>AIC Bounding Box Tool</title>
     <link rel="stylesheet" href="/assets/styles.css">
     <script src="/assets/app.js" defer></script>
@@ -30,7 +30,7 @@
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark">AIC</span>
-          <div><h1>Bounding Box Tool</h1><small>YOLO POSE · WEB EDITOR</small></div>
+          <div><h1>Bounding Box Tool</h1><small>YOLO pose editor</small></div>
         </div>
         <form id="open-form" class="path-form">
           <label class="sr-only" for="dataset-path">Dataset 경로</label>
@@ -42,7 +42,7 @@
           <button type="submit" class="primary"><svg class="icon"><use href="#icon-folder"/></svg>Open</button>
         </form>
         <div class="save-state" id="save-state" data-state="idle">
-          <span></span><strong>NO DATASET</strong>
+          <span></span><strong>No dataset</strong>
         </div>
       </header>
 
@@ -72,7 +72,7 @@
 
       <main class="workspace">
         <aside class="panel image-panel">
-          <header><div class="panel-title"><svg class="icon"><use href="#icon-images"/></svg><div><small>DATASET</small><h2>Images</h2></div></div><span id="image-count">0</span></header>
+          <header><div class="panel-title"><svg class="icon"><use href="#icon-images"/></svg><div><small>Dataset</small><h2>Images</h2></div></div><span id="image-count">0</span></header>
           <div class="search-wrap">
             <svg class="icon"><use href="#icon-search"/></svg>
             <input id="image-search" type="search" placeholder="파일 이름 검색" autocomplete="off">
@@ -102,11 +102,11 @@
 
         <aside class="panel inspector-panel">
           <section class="objects-section">
-            <header><div class="panel-title"><svg class="icon"><use href="#icon-box"/></svg><div><small>ANNOTATION</small><h2>Objects</h2></div></div><span id="object-count">0</span></header>
+            <header><div class="panel-title"><svg class="icon"><use href="#icon-box"/></svg><div><small>Annotation</small><h2>Objects</h2></div></div><span id="object-count">0</span></header>
             <ol id="object-list" class="item-list object-list"></ol>
           </section>
           <section id="inspector" class="inspector" hidden>
-            <div class="section-heading"><small>SELECTED OBJECT</small><strong id="selected-object">Object</strong></div>
+            <div class="section-heading"><small>Selected object</small><strong id="selected-object">Object</strong></div>
             <label>Class
               <select id="class-select"></select>
             </label>
@@ -115,7 +115,7 @@
             <div id="keypoint-controls" class="keypoint-controls"></div>
           </section>
           <section class="warnings-section">
-            <div class="section-heading"><small>WARNINGS</small><span id="warning-count">0</span></div>
+            <div class="section-heading"><small>Warnings</small><span id="warning-count">0</span></div>
             <div id="warnings" class="warnings">No warnings</div>
           </section>
           <section class="help-section">
@@ -131,7 +131,7 @@
 
     <dialog id="class-dialog">
       <form method="dialog" class="dialog-card">
-        <small>OBJECT CLASS</small>
+        <small>Object class</small>
         <h2>Class 선택</h2>
         <label>Class<select id="dialog-class-select"></select></label>
         <label id="custom-class-wrap" hidden>Class ID<input id="custom-class-id" type="number" min="0" max="9999" value="0"></label>

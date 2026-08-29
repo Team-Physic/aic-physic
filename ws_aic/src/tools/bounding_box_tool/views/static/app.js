@@ -1,13 +1,14 @@
 "use strict"; // Browser-side Model / View / Controller.
 
-const KEYPOINT_COLORS = ["#ff5c55", "#ffad42", "#ff4bd8", "#489cff"];
+const KEYPOINT_COLORS = ["#ec7182", "#e5a665", "#aa9af4", "#62a8f7"];
+const CLASS_COLORS = ["#8291ff", "#e5a665", "#ec7182", "#62a8f7", "#aa9af4", "#65c4d7", "#d58bdd", "#8dbd78"];
 const MIN_BOX_SIZE = 0.00001;
 const clamp = (value, low = 0, high = 1) => Math.min(Math.max(value, low), high);
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
 const annotationKey = (annotations) => JSON.stringify(annotations);
 
 function classColor(classId) {
-  return `hsl(${(classId * 47 + 110) % 360} 72% 58%)`;
+  return CLASS_COLORS[Math.abs(Number(classId) || 0) % CLASS_COLORS.length];
 }
 
 function bboxEdges(annotation) {
@@ -351,9 +352,9 @@ class EditorView {
     const total = this.model.dataset.images?.length || 0;
     this.elements["image-position"].textContent = `${this.model.currentIndex >= 0 ? this.model.currentIndex + 1 : 0} / ${total}`;
     const saveState = this.elements["save-state"];
-    if (!hasImage) { saveState.dataset.state = "idle"; saveState.querySelector("strong").textContent = "NO DATASET"; }
-    else if (this.model.dirty) { saveState.dataset.state = "dirty"; saveState.querySelector("strong").textContent = "UNSAVED"; }
-    else { saveState.dataset.state = "saved"; saveState.querySelector("strong").textContent = "SAVED"; }
+    if (!hasImage) { saveState.dataset.state = "idle"; saveState.querySelector("strong").textContent = "No dataset"; }
+    else if (this.model.dirty) { saveState.dataset.state = "dirty"; saveState.querySelector("strong").textContent = "Unsaved"; }
+    else { saveState.dataset.state = "saved"; saveState.querySelector("strong").textContent = "Saved"; }
     this.elements["canvas-empty"].hidden = hasImage;
     this.elements["image-meta"].textContent = hasImage ? `${this.model.image.naturalWidth}×${this.model.image.naturalHeight} · ${this.model.annotations.length} objects` : "—";
   }
@@ -419,12 +420,12 @@ class EditorView {
     this.ctx.drawImage(image, t.x, t.y, image.naturalWidth * t.scale, image.naturalHeight * t.scale);
     if (!this.model.overlayVisible) return;
     this.model.annotations.forEach((annotation, index) => this.drawAnnotation(annotation, index));
-    if (this.previewBox) this.drawDashedRect(this.previewBox, "#525c5e");
-    if (this.selectionRect) this.drawDashedRect(this.selectionRect, "#58e0ff", true);
+    if (this.previewBox) this.drawDashedRect(this.previewBox, "#727986");
+    if (this.selectionRect) this.drawDashedRect(this.selectionRect, "#8291ff", true);
   }
   drawAnnotation(annotation, index) {
     const selected = index === this.model.selectedIndex || this.model.selectedAnnotations.has(index);
-    const color = selected ? "#f2f6f5" : classColor(annotation.class_id);
+    const color = selected ? "#f1f3f6" : classColor(annotation.class_id);
     const [left, top, right, bottom] = bboxEdges(annotation);
     const start = this.normToCanvas(left, top); const end = this.normToCanvas(right, bottom);
     const ctx = this.ctx;
@@ -432,7 +433,7 @@ class EditorView {
     ctx.strokeStyle = color; ctx.lineWidth = selected ? 3 : 2; ctx.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y);
     const visiblePoints = annotation.keypoints.filter((point) => point[2] > 0).map((point) => this.normToCanvas(point[0], point[1]));
     if (visiblePoints.length > 1) {
-      ctx.beginPath(); ctx.strokeStyle = "#525c5e"; ctx.lineWidth = 1.7;
+      ctx.beginPath(); ctx.strokeStyle = "#727986"; ctx.lineWidth = 1.7;
       visiblePoints.forEach((point, pointIndex) => pointIndex ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
       ctx.closePath(); ctx.stroke();
     }
@@ -440,19 +441,19 @@ class EditorView {
       if (visibility <= 0) return;
       const point = this.normToCanvas(x, y); const keySelected = this.model.selectedKeypoints.has(`${index}:${pointIndex}`);
       ctx.beginPath(); ctx.arc(point.x, point.y, keySelected ? 7 : 5, 0, Math.PI * 2);
-      ctx.strokeStyle = keySelected ? "#f2f6f5" : KEYPOINT_COLORS[pointIndex]; ctx.lineWidth = keySelected ? 3 : 2;
+      ctx.strokeStyle = keySelected ? "#f1f3f6" : KEYPOINT_COLORS[pointIndex]; ctx.lineWidth = keySelected ? 3 : 2;
       if (visibility === 1) { ctx.setLineDash([3, 2]); ctx.stroke(); ctx.setLineDash([]); }
       else { ctx.fillStyle = KEYPOINT_COLORS[pointIndex]; ctx.fill(); ctx.stroke(); }
       if (selected || keySelected) {
-        ctx.font = "700 10px ui-monospace, monospace"; ctx.lineWidth = 3; ctx.strokeStyle = "#071011"; ctx.strokeText(`${pointIndex + 1}:${visibility}`, point.x + 7, point.y - 8);
+        ctx.font = "700 10px ui-monospace, monospace"; ctx.lineWidth = 3; ctx.strokeStyle = "#0c0e12"; ctx.strokeText(`${pointIndex + 1}:${visibility}`, point.x + 7, point.y - 8);
         ctx.fillStyle = KEYPOINT_COLORS[pointIndex]; ctx.fillText(`${pointIndex + 1}:${visibility}`, point.x + 7, point.y - 8);
       }
     });
     if (selected) [[start.x, start.y], [end.x, start.y], [end.x, end.y], [start.x, end.y]].forEach(([x, y]) => {
-      ctx.fillStyle = "#f2f6f5"; ctx.strokeStyle = "#101414"; ctx.lineWidth = 1; ctx.fillRect(x - 4, y - 4, 8, 8); ctx.strokeRect(x - 4, y - 4, 8, 8);
+      ctx.fillStyle = "#f1f3f6"; ctx.strokeStyle = "#12151a"; ctx.lineWidth = 1; ctx.fillRect(x - 4, y - 4, 8, 8); ctx.strokeRect(x - 4, y - 4, 8, 8);
     });
     ctx.font = "700 11px ui-sans-serif, sans-serif"; const labelWidth = ctx.measureText(annotation.label).width + 10;
-    const labelY = Math.max(0, start.y - 19); ctx.fillStyle = "#08100fe6"; ctx.fillRect(start.x, labelY, labelWidth, 18);
+    const labelY = Math.max(0, start.y - 19); ctx.fillStyle = "#11141ae6"; ctx.fillRect(start.x, labelY, labelWidth, 18);
     ctx.fillStyle = color; ctx.fillText(annotation.label, start.x + 5, labelY + 13);
     ctx.restore();
   }
@@ -460,7 +461,7 @@ class EditorView {
     const ctx = this.ctx; const a = this.normToCanvas(rect.x1, rect.y1); const b = this.normToCanvas(rect.x2, rect.y2);
     const left = Math.min(a.x, b.x), top = Math.min(a.y, b.y), width = Math.abs(b.x - a.x), height = Math.abs(b.y - a.y);
     ctx.save(); ctx.setLineDash([6, 4]); ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.strokeRect(left, top, width, height);
-    if (fill) { ctx.fillStyle = "#58e0ff18"; ctx.fillRect(left, top, width, height); } ctx.restore();
+    if (fill) { ctx.fillStyle = "#8291ff18"; ctx.fillRect(left, top, width, height); } ctx.restore();
   }
   hitTest(event) {
     if (!this.model.image || !this.model.overlayVisible) return null;
