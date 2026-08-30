@@ -92,7 +92,7 @@ class FinalPolicy(Policy):
             0.0, _env_float("AIC_APPROACH_MAX_DISTANCE_M", 0.5)
         )
         self.track_max_misses = max(1, _env_int("AIC_TRACK_MAX_MISSES", 3))
-        self.track_reacquire_hits = max(1, _env_int("AIC_TRACK_REACQUIRE_HITS", 2))
+        self.track_reacquire_hits = max(1, _env_int("AIC_TRACK_REACQUIRE_HITS", 3))
         self.track_retry_s = max(0.0, _env_float("AIC_TRACK_RETRY_S", 0.05))
         self.target_lock_hits = max(1, _env_int("AIC_TARGET_LOCK_HITS", 5))
         self.target_lock_radius_m = max(
@@ -167,11 +167,16 @@ class FinalPolicy(Policy):
         message.header.stamp = estimate.stamp
         message.point.x, message.point.y, message.point.z = map(float, estimate.xyz)
         self._publisher.publish(message)
+        reid = (
+            ""
+            if estimate.reid_score is None
+            else f", reid={estimate.reid_score:.4f}"
+        )
         self.get_logger().info(
             f"{color}[FinalPolicy] {label}: class={estimate.class_name}, "
             f"xyz=({estimate.xyz[0]:+.4f}, {estimate.xyz[1]:+.4f}, "
             f"{estimate.xyz[2]:+.4f}), "
-            f"reproj={estimate.reprojection_rms_px:.2f}px{ANSI_RESET}"
+            f"reproj={estimate.reprojection_rms_px:.2f}px{reid}{ANSI_RESET}"
         )
 
     def _stage_lift_up_detect(
@@ -274,6 +279,8 @@ class FinalPolicy(Policy):
             )
             return False
         self._estimate = estimate
+        if not vision.lock_identity(estimate):
+            return False
         self._publish_estimate(estimate, "target locked")
         self.sleep_for(motion.LIFT_SETTLE_S)
         return True
@@ -292,14 +299,14 @@ class FinalPolicy(Policy):
         provisional: PortEstimate | None = None
         for _ in range(self.vision_retries):
             ready, candidate = poll_yolo(True)
-            if (
+            valid_candidate = (
                 ready
                 and candidate is not None
                 and candidate.stamp_ns > recovery_min_stamp_ns
                 and candidate.stamp_ns > previous_stamp_ns
-                and _matches_locked_target(
-                    locked, candidate, self.target_lock_radius_m
-                )
+            )
+            if valid_candidate and candidate is not None and _matches_locked_target(
+                locked, candidate, self.target_lock_radius_m
             ):
                 hits += 1
                 previous_stamp_ns = candidate.stamp_ns
@@ -313,7 +320,8 @@ class FinalPolicy(Policy):
                         ANSI_GREEN,
                     )
                     return True
-            else:
+            elif valid_candidate:
+                # 후보가 아예 없는 frame은 3회의 유효 detection budget을 차감하지 않는다.
                 hits = 0
             if hits < self.track_reacquire_hits:
                 self.sleep_for(self.vision_retry_s)

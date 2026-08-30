@@ -354,6 +354,9 @@ def _policy_environment(
     env["AIC_IMG2POS_AUTO_ANNOTATE_PORTS"] = (
         "true" if args.auto_annotate_ports else "false"
     )
+    env["AIC_REID_BENCHMARK_LABELS"] = (
+        "true" if args.reid_benchmark_labels else "false"
+    )
     env["AIC_IMG2POS_DEPTH_VISIBILITY"] = (
         "true" if args.auto_annotate_ports else "false"
     )

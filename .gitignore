@@ -23,6 +23,7 @@ ws_aic/results/*
 
 # Model weights and generated outputs
 *.pt
+/models/reid/
 **/weight/
 **/output/
 **/outputs/

@@ -31,7 +31,7 @@ ANNOTATION_DEPTH_MARGIN_M = 0.002
 ANNOTATION_DEPTH_PATCH_RADIUS_PX = 2
 ANNOTATION_DEPTH_NEAR_QUANTILE = 0.2
 ANNOTATION_MIN_VISIBLE_KEYPOINTS = 2
-ANNOTATION_PRESERVE_OCCLUDED_POLICIES = frozenset({"near-port"})
+ANNOTATION_PRESERVE_OCCLUDED_POLICIES = frozenset({"near-port", "reacquisition"})
 ANNOTATION_DEPTH_IMAGE_SIZE_PX = (576, 512)
 ANNOTATION_DEPTH_UPDATE_RATE_HZ = 5.0
 SFP_RAIL_COUNT = 5
@@ -123,6 +123,25 @@ def port_annotation_class(port_type: str, rail: int, port: int = 0) -> tuple[int
     if port_type == "sc":
         return SC_CLASS_ID, PORT_CLASS_NAMES[SC_CLASS_ID]
     raise ValueError(f"unsupported port type: {port_type}")
+
+
+def benchmark_port_annotation(
+    port_type: str,
+    rail: int,
+    port: int = 0,
+    *,
+    collapse_sfp_class: bool,
+) -> tuple[int, str, str]:
+    """학습 class는 보존하고 ReID benchmark에서만 SFP identity를 분리한다."""
+    class_id, label = port_annotation_class(port_type, rail, port)
+    if port_type == "sfp" and collapse_sfp_class:
+        return 0, "sfp_port", f"{rail}{port}"
+    instance_id = (
+        f"nic_card_mount_{rail}/sfp_port_{port}"
+        if port_type == "sfp"
+        else f"sc_port_{rail}/sc_port_base"
+    )
+    return class_id, label, instance_id
 
 
 def is_port_visibility_failure(detail: str) -> bool:
@@ -476,10 +495,11 @@ def _annotation_rows_by_camera(
     policy,
     observation,
     annotation_ports: list[dict[str, Any]] | tuple[dict[str, Any], ...],
-) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, list[str]]]:
     """camera별로 화면 안에 완전히 투영된 모든 port의 YOLO pose row를 만든다."""
     rows = {camera: [] for camera in ("left", "center", "right")}
     labels = {camera: [] for camera in rows}
+    instances = {camera: [] for camera in rows}
     preserve_occluded = (
         str(getattr(policy, "collection_policy", ""))
         in ANNOTATION_PRESERVE_OCCLUDED_POLICIES
@@ -520,7 +540,8 @@ def _annotation_rows_by_camera(
                     _yolo_pose_row(port["class_id"], projection, visibilities)
                 )
                 labels[camera].append(port["label"])
-    return rows, labels
+                instances[camera].append(str(port["instance_id"]))
+    return rows, labels, instances
 
 
 def _stamp_ns(stamp) -> int | None:
@@ -1267,13 +1288,18 @@ def _write_yolo_pose_config(policy) -> None:
         except FileExistsError:
             if not labels_path.is_symlink() or os.readlink(labels_path) != "annotations":
                 raise
+    class_names = (
+        {0: "sfp_port"}
+        if bool(getattr(policy, "reid_benchmark_labels", False))
+        else PORT_CLASS_NAMES
+    )
     content = "\n".join(
         [
             "train: images/train",
             "val: images/val",
             "test: images/test",
             "names:",
-            *(f"  {class_id}: {name}" for class_id, name in PORT_CLASS_NAMES.items()),
+            *(f"  {class_id}: {name}" for class_id, name in class_names.items()),
             "kpt_shape: [4, 3]",
             "flip_idx: [0, 1, 2, 3]",
             "",
@@ -1312,7 +1338,7 @@ def write_manifest(policy) -> None:
                 f"  angle_limit_rad: {policy.descent_angle_limit:g}",
             ]
         )
-    else:
+    elif policy.collection_policy == "near-port":
         sampling.extend(
             [
                 "  position_tiers_mm: ["
@@ -1322,6 +1348,16 @@ def write_manifest(policy) -> None:
                 + "]",
                 "  minimum_actual_capture_clearance_mm: "
                 f"{policy.min_capture_clearance * 1000.0:g}",
+            ]
+        )
+    else:
+        sampling.extend(
+            [
+                f"  events_per_trial: {policy.collect_steps}",
+                f"  visible_distance_mm: {policy.reid_baseline_distance_m * 1000.0:g}",
+                f"  occlusion_distance_mm: {policy.reid_occlusion_distance_m * 1000.0:g}",
+                f"  phase_hold_s: {policy.reid_phase_hold_s:g}",
+                "  phase_topic: /reid_benchmark/phase",
             ]
         )
     if policy.collection_policy in {"descent", "near-port"}:
@@ -1344,6 +1380,7 @@ def write_manifest(policy) -> None:
                 "  format: yolo_pose",
                 "  layout: annotations/<split>/<camera>/trial_<index>/*.txt",
                 "  class_names: yolo_pose.yaml#names",
+                "  identity_field: samples.jsonl#annotation_instance_ids",
                 "  keypoint_order: [x_min_y_max, x_max_y_max, x_max_y_min, x_min_y_min]",
                 "  keypoint_shape: [4, 3]",
                 "  port_outer_size_mm: {sfp: [16.224, 13.698], sc: [25.781, 9.300]}",
@@ -1494,12 +1531,15 @@ def save_sample(
         return False, "자동 annotation 대상 port가 없음"
     annotation_rows: dict[str, list[str]] = {}
     annotation_labels: dict[str, list[str]] = {}
+    annotation_instance_ids: dict[str, list[str]] = {}
     annotation_counts: dict[str, int] = {}
     if auto_annotate_ports:
         try:
-            annotation_rows, annotation_labels = _annotation_rows_by_camera(
-                policy, observation, annotation_ports
-            )
+            (
+                annotation_rows,
+                annotation_labels,
+                annotation_instance_ids,
+            ) = _annotation_rows_by_camera(policy, observation, annotation_ports)
             annotation_counts = {
                 camera: len(labels) for camera, labels in annotation_labels.items()
             }
@@ -1659,6 +1699,7 @@ def save_sample(
         record["annotation_format"] = "yolo_pose"
         record["annotation_object_counts"] = annotation_counts
         record["annotation_labels"] = annotation_labels
+        record["annotation_instance_ids"] = annotation_instance_ids
     try:
         with _dataset_write_lock(policy):
             with policy.samples_path.open("a", encoding="utf-8") as stream:

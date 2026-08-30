@@ -25,7 +25,7 @@ BASE_ROS_GZ_BRIDGE_CONFIG_PATH = (
 )
 EPISODE_TRACKING_DIR = Path("/tmp/aic_episodes")
 
-COLLECTION_POLICY_CHOICES = ("board-view", "descent", "near-port")
+COLLECTION_POLICY_CHOICES = ("board-view", "descent", "near-port", "reacquisition")
 POLICY_MODULE = "phy_data_collection.policy.PortOffsetCollect"
 ENGINE_SETUP = "/ws_aic/install/setup.bash"
 RUN_MARKER_ENV = "AIC_PORTOFFSET_RUN_ID"
@@ -49,6 +49,10 @@ ROSBAG_TOPICS = (
     "/center_camera/depth_image",
     "/right_camera/image",
     "/right_camera/depth_image",
+    "/left_camera/camera_info",
+    "/center_camera/camera_info",
+    "/right_camera/camera_info",
+    "/reid_benchmark/phase",
 )
 
 CLI_DEFAULTS = {
@@ -82,6 +86,7 @@ CLI_DEFAULTS = {
     "val_ratio": 0.15,
     "test_ratio": 0.15,
     "auto_annotate_ports": False,
+    "reid_benchmark_labels": False,
     "push_to_hub": False,
     "hf_repo_id": "team-physic/aic-align",
     "hf_revision": "",

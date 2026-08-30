@@ -25,7 +25,7 @@ from rclpy.duration import Duration
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import Image
-from std_msgs.msg import Header
+from std_msgs.msg import Header, String
 from tf2_ros import TransformException
 
 from . import dataset, motion
@@ -54,7 +54,7 @@ COLORS = {
     "reset": "\033[0m",
     "bold": "\033[1m",
 }
-COLLECTION_POLICIES = {"board-view", "descent", "near-port"}
+COLLECTION_POLICIES = {"board-view", "descent", "near-port", "reacquisition"}
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -253,6 +253,21 @@ class PortOffsetCollect(Policy):
         self.auto_annotate_ports = _env_bool(
             "AIC_IMG2POS_AUTO_ANNOTATE_PORTS", False
         )
+        self.reid_benchmark_labels = _env_bool(
+            "AIC_REID_BENCHMARK_LABELS", False
+        )
+        self.reid_baseline_distance_m = max(
+            0.05, _env_float("AIC_REID_BASELINE_DISTANCE_M", 0.35)
+        )
+        self.reid_occlusion_distance_m = max(
+            0.01, _env_float("AIC_REID_OCCLUSION_DISTANCE_M", 0.05)
+        )
+        self.reid_phase_hold_s = max(
+            0.0, _env_float("AIC_REID_PHASE_HOLD_S", 1.0)
+        )
+        self._reid_phase_publisher = parent_node.create_publisher(
+            String, "/reid_benchmark/phase", 10
+        )
         self.auto_annotation_visibility = (
             self.auto_annotate_ports
             and _env_bool("AIC_IMG2POS_DEPTH_VISIBILITY", False)
@@ -435,13 +450,18 @@ class PortOffsetCollect(Policy):
                 if connector == "sfp"
                 else 0
             )
-            class_id, label = dataset.port_annotation_class(connector, rail, port)
+            class_id, label, instance_id = dataset.benchmark_port_annotation(
+                connector,
+                rail,
+                port,
+                collapse_sfp_class=self.reid_benchmark_labels,
+            )
             return [
                 {
                     "class_id": class_id,
                     "label": label,
                     "port_type": connector,
-                    "instance_id": str(task.port_name),
+                    "instance_id": instance_id,
                     "frame_id": fallback_frame,
                 }
             ]
@@ -452,15 +472,18 @@ class PortOffsetCollect(Policy):
             ports = []
             for rail in active_rails:
                 for port in range(dataset.SFP_PORT_COUNT):
-                    class_id, label = dataset.port_annotation_class(
-                        connector, rail, port
+                    class_id, label, instance_id = dataset.benchmark_port_annotation(
+                        connector,
+                        rail,
+                        port,
+                        collapse_sfp_class=self.reid_benchmark_labels,
                     )
                     ports.append(
                         {
                             "class_id": class_id,
                             "label": label,
                             "port_type": connector,
-                            "instance_id": f"nic_card_mount_{rail}/sfp_port_{port}",
+                            "instance_id": instance_id,
                             "frame_id": (
                                 f"task_board/nic_card_mount_{rail}/"
                                 f"sfp_port_{port}_link_entrance"
@@ -531,6 +554,24 @@ class PortOffsetCollect(Policy):
         except Exception:
             pass
         return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+
+    def publish_reid_phase(self, event_id: int, phase: str, task: Task) -> None:
+        """Rosbag frame을 reacquisition event/phase GT와 연결한다."""
+        message = String()
+        message.data = json.dumps(
+            {
+                "event_id": int(event_id),
+                "phase": str(phase),
+                "class": "sfp_port",
+                "instance_id": (
+                    f"{dataset._last_number(task.target_module_name, 0)}"
+                    f"{dataset._last_number(task.port_name, 0)}"
+                ),
+                "stamp_ns": int(self.get_clock().now().nanoseconds),
+            },
+            separators=(",", ":"),
+        )
+        self._reid_phase_publisher.publish(message)
 
     def _finish(self, episode_dir: Path, task: Task, counts: dict[str, int], status: str, detail: str = "") -> bool:
         """episode 수집 summary를 기록하고 engine에 완료를 반환한다."""
@@ -642,6 +683,10 @@ class PortOffsetCollect(Policy):
                 ("lift_up", motion.lift),
                 ("approach", motion.approach),
                 ("collect", motion.collect),
+            ),
+            "reacquisition": (
+                ("lift_up", motion.lift),
+                ("reacquisition", motion.reacquisition_sequence),
             ),
         }[self.collection_policy]
         for name, stage in stages:

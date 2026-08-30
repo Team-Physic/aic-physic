@@ -85,6 +85,13 @@ def _add_dataset_args(parser: argparse.ArgumentParser) -> None:
         type=_parse_bool,
         metavar=BOOLEAN_METAVAR,
     )
+    _add_argument(
+        parser,
+        "reid_benchmark_labels",
+        type=_parse_bool,
+        metavar=BOOLEAN_METAVAR,
+        help="Collapse SFP classes to sfp_port and preserve rail/port as instance IDs.",
+    )
     _add_argument(parser, "push_to_hub", type=_parse_bool, metavar=BOOLEAN_METAVAR)
     _add_argument(parser, "hf_repo_id")
     _add_argument(parser, "hf_revision")

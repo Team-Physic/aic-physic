@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 
 from .geometry import transform_matrix
+from .final_policy_reid import AppearanceReID
 
 
 CAMERAS = ("left", "center", "right")
@@ -87,6 +88,7 @@ class PortEstimate:
     detections: dict[str, dict[str, Any]]
     images: dict[str, np.ndarray]
     reprojection_rms_px: float
+    reid_score: float | None = None
 
 
 def parse_model_class(class_name: str) -> TargetSpec:
@@ -218,6 +220,7 @@ class PortVision:
         self.target = target
         self.model = model
         self.debug_image_callback = debug_image_callback
+        self.reid = AppearanceReID(policy.get_logger())
         self._device_logged = False
         self.confidence = _env_float("AIC_YOLO_CONFIDENCE", 0.8)
         self.keypoint_confidence = _env_float("AIC_YOLO_KEYPOINT_CONFIDENCE", 0.25)
@@ -251,20 +254,24 @@ class PortVision:
         return np.asarray(values if len(values) == 3 else default.split(","), dtype=float)
 
     def load_model(self) -> bool:
-        """SFP YOLO model을 명시 경로에서 lazy-load한다."""
-        if self.model is not None:
-            return True
-        variable = "AIC_SFP_YOLO_MODEL_PATH"
-        model_path = os.environ.get(variable, "").strip()
-        if not model_path:
-            self.policy.get_logger().error(f"FinalPolicy: {variable} is required")
-            return False
-        try:
-            from ultralytics import YOLO
+        """YOLO와 선택된 appearance encoder를 Policy 시작 전에 load한다."""
+        if self.model is None:
+            variable = "AIC_SFP_YOLO_MODEL_PATH"
+            model_path = os.environ.get(variable, "").strip()
+            if not model_path:
+                self.policy.get_logger().error(f"FinalPolicy: {variable} is required")
+                return False
+            try:
+                from ultralytics import YOLO
 
-            self.model = YOLO(model_path)
+                self.model = YOLO(model_path)
+            except Exception as exc:
+                self.policy.get_logger().error(f"FinalPolicy: YOLO load failed: {exc}")
+                return False
+        try:
+            self.reid.load()
         except Exception as exc:
-            self.policy.get_logger().error(f"FinalPolicy: YOLO load failed: {exc}")
+            self.policy.get_logger().error(f"FinalPolicy: ReID load failed: {exc}")
             return False
         self.policy.get_logger().info(
             f"{ANSI_BLUE}FinalPolicy: YOLO requested device: "
@@ -408,6 +415,11 @@ class PortVision:
                     {
                         "class_name": class_name,
                         "confidence": float(self._numpy(box.conf).reshape(-1)[0]),
+                        "keypoint_confidence": (
+                            point_confidence
+                            if confidence_all is not None
+                            else np.ones(4, dtype=float)
+                        ),
                         "keypoints": keypoints,
                         "uv": np.mean(keypoints, axis=0),
                     }
@@ -489,7 +501,7 @@ class PortVision:
         return sorted(candidates, key=lambda candidate: candidate.reprojection_rms_px)
 
     def estimate(self, observation) -> PortEstimate | None:
-        """동기화 Observation에서 최저 재투영 오차 target pose를 반환한다."""
+        """동기화 Observation에서 geometry와 ReID를 통과한 target을 반환한다."""
         if observation is None:
             return None
         try:
@@ -502,7 +514,17 @@ class PortVision:
         candidates = self._estimate_candidates(
             data, self._detect(data["images"], data["headers"])
         )
-        return candidates[0] if candidates else None
+        return self.reid.select(candidates)
+
+    def lock_identity(self, estimate: PortEstimate) -> bool:
+        """Exact-class initial lock의 appearance를 recovery memory로 고정한다."""
+        try:
+            return self.reid.remember(estimate)
+        except Exception as exc:
+            self.policy.get_logger().error(
+                f"FinalPolicy: initial ReID descriptor failed: {exc}"
+            )
+            return False
 
     def track(self, observation, previous: PortEstimate) -> PortEstimate | None:
         """YOLO 호출 없이 optical flow로 직전 target keypoint를 갱신한다."""

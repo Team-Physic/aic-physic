@@ -481,6 +481,15 @@ def _prepare_args(args: argparse.Namespace) -> None:
         raise ValueError("val-ratio and test-ratio must be in [0, 1)")
     if args.val_ratio + args.test_ratio >= 1.0:
         raise ValueError("val-ratio + test-ratio must be less than 1")
+    if args.collection_policy == "reacquisition":
+        # ReID GT는 동일 class 안에서 rail/port instance만 달라야 한다.
+        args.reid_benchmark_labels = True
+    if args.reid_benchmark_labels and not args.auto_annotate_ports:
+        raise ValueError("reid-benchmark-labels requires auto-annotate-ports=true")
+    if args.collection_policy == "reacquisition" and not args.record_rosbag:
+        raise ValueError("reacquisition collection requires record-rosbag=true")
+    if args.collection_policy == "reacquisition" and not args.auto_annotate_ports:
+        raise ValueError("reacquisition collection requires auto-annotate-ports=true")
     tiers = _parse_positive_csv(args.sampling_tiers_mm, "sampling-tiers-mm")
     weights = _parse_positive_csv(args.sampling_tier_weights, "sampling-tier-weights")
     if len(tiers) != len(weights):

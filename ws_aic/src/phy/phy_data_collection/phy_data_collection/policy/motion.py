@@ -850,6 +850,71 @@ def approach(policy, context, get_observation, move_robot) -> bool:
     return True
 
 
+def reacquisition_sequence(policy, context, get_observation, move_robot) -> bool:
+    """Rosbag에 관측→robot occlusion→재등장 event를 반복 기록한다."""
+    try:
+        plug_tf = dataset.shift_origin(
+            policy.lookup_transform("base_link", context["cable_tip_frame"]),
+            context["plug_offset"],
+        )
+        gripper_tf = policy.lookup_transform("base_link", "gripper/tcp")
+        baseline, _ = policy.planner.build_pose(
+            context["port_snapshot"].transform,
+            plug_tf,
+            gripper_tf,
+            z_offset=policy.reid_baseline_distance_m,
+        )
+        occlusion, _ = policy.planner.build_pose(
+            context["port_snapshot"].transform,
+            plug_tf,
+            gripper_tf,
+            z_offset=policy.reid_occlusion_distance_m,
+        )
+    except TransformException as exc:
+        policy.get_logger().error(
+            f"[PortOffsetCollect] reacquisition TF failed: {exc}"
+        )
+        return False
+
+    for event_id in range(policy.collect_steps):
+        for phase, target in (
+            ("visible_before", baseline),
+            ("occluded", occlusion),
+            ("visible_after", baseline),
+        ):
+            start = _tcp_pose(get_observation())
+            if start is None:
+                return False
+            distance = float(
+                np.linalg.norm(
+                    np.asarray(
+                        [
+                            target.position.x - start.position.x,
+                            target.position.y - start.position.y,
+                            target.position.z - start.position.z,
+                        ]
+                    )
+                )
+            )
+            steps = min(160, max(10, int(np.ceil(distance / 0.003))))
+            if not _follow(
+                policy,
+                move_robot,
+                start,
+                target,
+                steps,
+                0.03,
+                f"reid_{phase}",
+                context["collect_stiffness"],
+                context["collect_damping"],
+            ):
+                return False
+            policy.publish_reid_phase(event_id, phase, context["task"])
+            policy.sleep_for(policy.reid_phase_hold_s)
+        context["counts"]["collect"] += 1
+    return True
+
+
 def _skew_text(timestamps: dict[str, Any]) -> str:
     """source별 nanosecond 시각 차이를 millisecond 문자열로 바꾼다."""
     return ", ".join(
