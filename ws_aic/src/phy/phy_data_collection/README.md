@@ -27,14 +27,17 @@ cd ws_aic/src
 
 PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
   collect_portoffset_randomization_data \
-  --collection-policy board-view \
+  --collection-policy reacquisition \
   --port-type sfp \
-  --trials 155 \
-  --workers 5 \
+  --trials 5 \
+  --workers 1 \
   --samples-per-trial 20 \
-  --dataset-version img2pos-v1 \
+  --dataset-version img2pos-v2 \
   --push-to-hub false \
-  --record-rosbag false
+  --record-rosbag false \
+  --no-headless \
+  --auto-annotate-ports true \
+  --record-rosbag true
 ```
 
 처음 실행하거나 source를 수정한 뒤에는 로컬 ROS package를 다시 설치합니다.
@@ -84,13 +87,14 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--samples-per-trial` | `40` | trial마다 저장할 capture 수 |
 | `--time-limit-s` | `600` | AIC trial config에 전달할 제한시간(초) |
 | `--trial-timeout-s` | 자동 (`780`) | runner가 summary를 기다리는 시간; 미지정 시 `time-limit-s + 180` |
-| `--collection-policy` | `near-port` | `board-view`, `descent`, `near-port` 중 선택 |
+| `--collection-policy` | `near-port` | `board-view`, `descent`, `near-port`, `reacquisition` 중 선택 |
 | `--policy` | `phy_data_collection.policy.PortOffsetCollect` | ROS policy module을 직접 override |
 | `--policy-start-wait-s` | `5` | simulator 시작 뒤 policy를 실행하기 전 대기시간(초) |
 | `--dataset-version` | 자동 생성 | `ws_aic/data/img2pos/` 아래 새 version 경로 |
 | `--resume` | 꺼짐 | 기존 version에 명시적으로 이어서 수집 |
 | `--val-ratio`, `--test-ratio` | `0.15`, `0.15` | trial 단위 validation/test 비율 |
 | `--auto-annotate-ports {true,false}` | `false` | 활성 포트의 bbox·4-keypoint와 synchronized depth 기반 visibility 생성 |
+| `--reid-benchmark-labels {true,false}` | `false` | SFP class를 `sfp_port`로 합치고 rail·port를 instance ID로 저장; `reacquisition`에서는 자동 활성화 |
 | `--headless`, `--no-headless` | `--headless` | Gazebo GUI 비활성화/활성화; `workers=1`일 때만 `--no-headless`가 적용됨 |
 | `--launch-rviz {true,false}` | `false` | RViz 실행 여부; headless 또는 병렬 실행이면 항상 꺼짐 |
 | `--distrobox` | `aic_eval_physic` | eval container 이름 |
@@ -101,7 +105,7 @@ PIXI_FROZEN=true pixi run ros2 run phy_data_collection \
 | `--robot-joint-noise-rad` | `0.069813` | home joint 각 축의 독립 대칭 잡음 범위 |
 | `--cable-rotation-noise-rad` | `0.04` | 기준 cable 자세 대비 전체 회전각 상한 |
 
-세 수집 구간은 모두 `PortOffsetCollect`에서 실행되며, `--collection-policy` 값으로
+네 수집 구간은 모두 `PortOffsetCollect`에서 실행되며, `--collection-policy` 값으로
 sampling과 stage만 선택합니다. 별도 ROS policy module은 필요하지 않습니다.
 
 dataset version을 생략하면 실행 시각으로 새 이름을 만들고, 기존 version은 `--resume`
@@ -315,7 +319,8 @@ trial이 정상 종료됩니다.
 - message count가 0보다 큼
 - 모든 MCAP 파일의 시작·종료 magic이 유효함
 
-기본 기록 topic은 다음과 같습니다.
+기본 기록 topic은 다음과 같습니다. `reacquisition`은 CameraInfo와 phase GT를 함께
+기록하므로 rosbag을 직접 평가 입력으로 변환할 수 있다.
 
 ```text
 /clock
@@ -328,6 +333,10 @@ trial이 정상 종료됩니다.
 /left_camera/image
 /center_camera/image
 /right_camera/image
+/left_camera/camera_info
+/center_camera/camera_info
+/right_camera/camera_info
+/reid_benchmark/phase
 ```
 
 ### 실행·정리 고급 옵션

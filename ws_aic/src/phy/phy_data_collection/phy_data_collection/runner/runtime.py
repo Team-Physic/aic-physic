@@ -555,8 +555,21 @@ def start_gazebo(
         f"export ZENOH_CONFIG_OVERRIDE={shlex.quote(_peer_zenoh_override(zenoh_port))}",
         launch_cmd,
     ]
-    inner = "\n".join(["set -e", *exports])
-    cmd = ["distrobox", "enter", args.distrobox, "--", "bash", "-lc", inner]
+    # Distrobox가 command 인자를 eval하므로 `$!`를 직접 넘기면 router 시작 전에
+    # host shell에서 확장된다. Trial 파일로 실행해 container bash만 변수를 해석한다.
+    launcher_path = config_path.with_name("gazebo_launcher.sh")
+    launcher_path.write_text(
+        "\n".join(["#!/usr/bin/env bash", "set -e", *exports, ""]),
+        encoding="utf-8",
+    )
+    cmd = [
+        "distrobox",
+        "enter",
+        args.distrobox,
+        "--",
+        "bash",
+        str(launcher_path),
+    ]
     print("[gazebo] " + shlex.join(cmd))
     return _start_logged_process(cmd, cwd=PIXI_WS)
 
