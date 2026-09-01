@@ -500,6 +500,10 @@ def start_gazebo(
     run_id: str,
 ) -> subprocess.Popen:
     """AIC Gazebo launch stack을 Distrobox의 독립 session/PGID로 실행한다."""
+    # Trial 디렉터리는 host/container 양쪽에서 같은 사용자로 쓸 수 있다.
+    # 전역 ~/aic_results의 소유권이 달라도 Engine scoring이 중단되지 않게 한다.
+    scoring_output_dir = config_path.parent / "aic_results"
+    scoring_output_dir.mkdir(parents=True, exist_ok=True)
     launch_args = [
         "spawn_task_board:=false",
         "spawn_cable:=false",
@@ -545,6 +549,7 @@ def start_gazebo(
         f"export IGN_PARTITION={shlex.quote(partition)}",
         "export RCUTILS_COLORIZED_OUTPUT=0",
         "export RCUTILS_LOGGING_BUFFERED_STREAM=1",
+        f"export AIC_RESULTS_DIR={shlex.quote(str(scoring_output_dir))}",
         f"export {RUN_MARKER_ENV}={shlex.quote(run_id)}",
         "export ZENOH_ROUTER_CONFIG_URI=/aic_zenoh_config.json5",
         f"export ZENOH_CONFIG_OVERRIDE={shlex.quote(router_override)}",
