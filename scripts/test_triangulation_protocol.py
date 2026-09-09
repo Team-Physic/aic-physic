@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 from triangulation_protocol import make_plan, cases, look_at_tcp, visibility, job_complete, configure_environment
-from run_triangulation_protocol import launcher_environment
+from run_triangulation_protocol import append_protocol_log, launcher_environment
 
 
 def test_protocol_contract():
@@ -112,8 +112,68 @@ def test_environment_and_evaluation_denominator():
     print('Environment isolation / evaluation denominator / timeout validation passed')
 
 
+def test_protocol_log():
+    """조건과 결과 event가 즉시 JSON Lines 파일로 남는지 확인한다."""
+    with tempfile.TemporaryDirectory(prefix='triangulation-log-') as folder:
+        path = Path(folder) / 'protocol.log'
+        append_protocol_log(path, 'JOB_STARTED', job_index=7, distance_m=.55, angle_deg=-15,
+                            light_scale=1.3)
+        append_protocol_log(path, 'CASE_FINISHED', case_id='layout_001_l2_d2_a0', status='captured')
+        records = [json.loads(line) for line in path.read_text().splitlines()]
+        assert records[0]['event'] == 'JOB_STARTED'
+        assert records[0]['job_index'] == 7
+        assert records[1]['case_id'] == 'layout_001_l2_d2_a0'
+        assert records[1]['status'] == 'captured'
+    print('Protocol event log persistence passed')
+
+
+def test_case_lifecycle_log():
+    """실제 case 순회에서 시작 로그가 촬영보다 먼저 보이고 예외도 종료 기록되는지 확인한다."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock, patch
+    from TriangulationCollect import TriangulationCollect
+    with tempfile.TemporaryDirectory(prefix='triangulation-lifecycle-') as folder:
+        root = Path(folder)
+        policy = object.__new__(TriangulationCollect)
+        policy.output = policy.capture_root = root
+        policy.stop_file = root/'stop'
+        policy.stop_file.touch()
+        selected = cases({'distances_m':[.35,.45,.55], 'angles_deg':[-15,0,15],
+                          'light_scales':[.7,1,1.3]}, 'layout_test', 2)
+        selected = [dict(c, target='SFP_00', card_count=1) for c in selected]
+        policy.job = dict(cases=selected, target='SFP_00', card_count=1,
+                          job_index=2, protocol_log=str(root/'protocol.log'))
+        policy._wait_for_tf = lambda *_: True
+        policy.lookup_latest_stamped = lambda *_: None
+        policy.get_logger = lambda: Mock()
+        policy._finish = Mock()
+        observed = []
+        def capture(case, *_):
+            rows = [json.loads(line) for line in (root/'protocol.log').read_text().splitlines()]
+            assert rows[-1]['event'] == 'CASE_STARTED'
+            assert rows[-1]['distance_m'] == case['distance_m']
+            assert rows[-1]['angle_deg'] == case['angle_deg']
+            assert rows[-1]['light_scale'] == 1.3
+            observed.append(case['id'])
+            raise RuntimeError('injected capture failure')
+        policy.capture_case = capture
+        task = SimpleNamespace(id='test', target_module_name='nic_card_mount_0', port_name='sfp_port_0')
+        with patch('TriangulationCollect.motion.control_for', return_value={}), \
+             patch('TriangulationCollect.motion.lift', return_value=True):
+            policy.insert_cable(task, Mock(), Mock(), Mock())
+        rows = [json.loads(line) for line in (root/'protocol.log').read_text().splitlines()]
+        finished = [r for r in rows if r['event']=='CASE_FINISHED']
+        assert len(observed) == len(finished) == 9
+        assert all(r['status']=='capture_error' and 'injected' in r['detail'] for r in finished)
+        assert [(r['distance_m'],r['angle_deg']) for r in finished] == [
+            (d,a) for d in (.55,.45,.35) for a in (-15,0,15)]
+    print('Real case loop / live start / failure logging passed (mocked robot)')
+
+
 if __name__ == '__main__':
     test_protocol_contract()
     test_look_at_and_visibility()
     test_resume_does_not_accept_missing_cases()
     test_environment_and_evaluation_denominator()
+    test_protocol_log()
+    test_case_lifecycle_log()

@@ -1,7 +1,7 @@
 # 고정 manifest의 관측 자세만 실행하고 각 조건의 성공·실패를 빠짐없이 저장한다.
 # GT는 정지한 task board의 entrance snapshot이며 카메라 TF는 RGB 촬영 시각에 조회한다.
 # 저장 NPZ에는 BGR 영상·depth·투영행렬·GT가 들어가며 YOLO는 별도 평가에서 실행한다.
-# 실제 삽입은 수행하지 않는다. ROS policy loader가 같은 이름의 class를 불러온다.
+# case 단계는 protocol.log에 즉시 저장한다. 실제 삽입은 수행하지 않는다. ROS policy loader가 같은 이름의 class를 불러온다.
 # 환경: AIC_TRIANGULATION_JOB 필수 JSON 경로. 조건·저장 경로·가시성 수치는 해당 JSON을 따른다.
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 from geometry_msgs.msg import Pose, Point, Quaternion
 
-from triangulation_protocol import CAMERAS, look_at_tcp, visibility, write_json, digest
+from triangulation_protocol import CAMERAS, look_at_tcp, visibility, write_json, digest, append_protocol_log
 from phy_data_collection.policy.PortOffsetCollect import PortOffsetCollect
 from phy_data_collection.policy import dataset, motion
 from phy_data_collection.policy.se3 import transform_matrix, matrix_quaternion
@@ -35,6 +35,15 @@ class TriangulationCollect(PortOffsetCollect):
         self.output = Path(self.job['output'])
         self.output.mkdir(parents=True, exist_ok=True)
 
+    def log_stage(self, event, case=None, **fields):
+        """현재 조건을 공용 로그에 즉시 보존한다. 거리는 중앙 광학 원점 기준 m이다."""
+        conditions = dict(case or {})
+        conditions.update(job_index=self.job.get('job_index'), attempt=self.output.name,
+                          target=self.job['target'], card_count=self.job['card_count'])
+        conditions.update(fields)
+        append_protocol_log(self.job.get('protocol_log', self.output/'protocol.log'), event,
+                            **conditions)
+
     def capture_case(self, case, port_frame, port_snapshot, get_observation, move_robot):
         """목표 자세 도달을 확인한 뒤 같은 시각의 RGB·TF와 대응 depth를 보존한다."""
         base_port = matrix(port_snapshot.transform)
@@ -50,14 +59,17 @@ class TriangulationCollect(PortOffsetCollect):
         start = motion._tcp_pose(get_observation())
         if start is None:
             return dict(row, status='missing_controller_state')
+        self.log_stage('HAPTIC_BASELINE', case)
         guard = motion.prepare_haptic_guard(self, get_observation)
         if guard is None:
             return dict(row, status='haptic_baseline_unavailable')
         steps = min(120, max(10, int(np.ceil(np.linalg.norm(target[:3,3] - [start.position.x, start.position.y, start.position.z])/.003))))
+        self.log_stage('MOVING', case)
         if not motion._follow(self, move_robot, start, pose, steps, .03, 'triangulation',
                               motion.STIFFNESS, motion.DAMPING, get_observation=get_observation, haptic_guard=guard):
             motion.retreat_to_pose(self, get_observation, move_robot, start, motion.STIFFNESS, motion.DAMPING)
             return dict(row, status='haptic_contact')
+        self.log_stage('SETTLING', case)
         stamp = self.set_pose_target(move_robot, pose)
         deadline = time.monotonic() + self.settle_timeout_s
         translation_error = rotation_error = float('inf')
@@ -81,6 +93,7 @@ class TriangulationCollect(PortOffsetCollect):
         # 기존 settle은 움직임의 정지를 판정하므로, 명령이 clamp되어 멈춘 경우를 별도로 거부한다.
         if not np.isfinite([translation_error,rotation_error]).all() or translation_error > .002 or rotation_error > np.deg2rad(1):
             return dict(row, status='pose_not_reached')
+        self.log_stage('RGB_DEPTH_SYNC', case)
         deadline = time.monotonic() + self.sync_wait_timeout_s
         depths = {}
         while time.monotonic() < deadline:
@@ -103,6 +116,7 @@ class TriangulationCollect(PortOffsetCollect):
             info = dataset.camera_info_for(observation,camera)
             if info is None or (info.width,info.height) != (image.width,image.height):
                 return dict(row,status='calibration_resolution_mismatch')
+        self.log_stage('VISIBILITY_CHECK', case)
         vision = PortVision(self, parse_model_class(self.job['target']))
         data = vision._projection_data(observation)
         if data is None:
@@ -136,6 +150,7 @@ class TriangulationCollect(PortOffsetCollect):
         local = base_port[:3,:3].T @ view
         row['actual_angle_deg'] = float(np.rad2deg(np.arctan2(local[0], -local[2])))
         row['archive'] = f'{case["id"]}.npz'
+        self.log_stage('SAVING', case)
         np.savez_compressed(self.output/row['archive'], **archive)
         row['archive_sha256'] = digest(self.output/row['archive'])
         # 모든 카메라의 실제 영상에 GT 외곽을 표시해 가시성 판정을 육안으로 검토할 수 있게 한다.
@@ -146,7 +161,8 @@ class TriangulationCollect(PortOffsetCollect):
                 cv2.polylines(image, [np.rint(uv).astype('int32')], True, (0,200,255), 2)
             cv2.putText(image, f'GT {self.job["target"]}: {row["visibility"][camera]["reason"]}',
                         (12,28), cv2.FONT_HERSHEY_SIMPLEX, .65, (0,200,255), 2)
-            cv2.imwrite(str(self.output/f'{case["id"]}_{camera}_gt.png'), image)
+            if not cv2.imwrite(str(self.output/f'{case["id"]}_{camera}_gt.png'), image):
+                raise OSError(f'GT image write failed: {case["id"]} {camera}')
         return dict(row, status='captured' if row['eligible'] else 'ineligible_view')
 
     def insert_cable(self, task, get_observation, move_robot, send_feedback):
@@ -159,6 +175,7 @@ class TriangulationCollect(PortOffsetCollect):
         port_frame = f'task_board/{task.target_module_name}/{task.port_name}_link_entrance'
         problem = None
         snapshot = None
+        self.log_stage('SETUP_STARTED')
         try:
             if not self._wait_for_tf('base_link', port_frame):
                 raise RuntimeError('port TF unavailable')
@@ -168,7 +185,9 @@ class TriangulationCollect(PortOffsetCollect):
                 raise RuntimeError('initial lift failed')
         except Exception as exc:
             problem = str(exc)
-        for case in self.job['cases']:
+        self.log_stage('SETUP_FINISHED', status='failed' if problem else 'ok', detail=problem)
+        for case_index, case in enumerate(self.job['cases'], 1):
+            self.log_stage('CASE_STARTED', case, case_index=case_index, case_count=len(self.job['cases']))
             counts['attempts'] += 1
             try:
                 row = dict(case, status='setup_failed', detail=problem) if problem else self.capture_case(
@@ -176,6 +195,8 @@ class TriangulationCollect(PortOffsetCollect):
             except Exception as exc:
                 row = dict(case, status='capture_error', detail=f'{type(exc).__name__}: {exc}')
             write_json(self.output/f'{case["id"]}.json', row)
+            self.log_stage('CASE_FINISHED', case, case_index=case_index,
+                           status=row['status'], detail=row.get('detail'))
             counts['collect'] += row['status'] == 'captured'
             self.get_logger().info(f'TRIANGULATION {case["id"]}: {row["status"]}')
         # status=ok는 모든 예정 조건의 종료 기록을 뜻한다. 가시성과 YOLO 성능은 별도 집계한다.

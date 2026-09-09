@@ -69,6 +69,21 @@ distrobox enter aic_eval_physic -- nvidia-smi
 동일 커밋, 완성된 `plan.json`, 기존 `ws_aic/model/best.pt`를 함께 옮긴다. 가중치는 Git ignore 대상이므로 별도로 전달해야 한다.
 아래 명령은 **프로젝트 루트**에서 실행한다. `PLAN`은 전달받은 고정 계획의 상대 또는 절대 경로로 지정한다.
 
+`plan` 명령은 job을 실행하지 않고 `plan.json`과 `plan.log`만 생성한다. `plan.log`에는
+300개 job의 layout·card·target·light와 각 job의 9개 거리·각도 case가 한 줄씩 저장된다.
+`run` 명령은 출력 디렉터리의 `protocol.log`에 job 시작·종료와 각 case의 진행을 즉시 누적한다.
+`CASE_STARTED`, `HAPTIC_BASELINE`, `MOVING`, `SETTLING`, `RGB_DEPTH_SYNC`,
+`VISIBILITY_CHECK`, `SAVING`, `CASE_FINISHED`에 job 번호·attempt·case ID·거리(m)·각도(deg)·light_scale이 포함된다.
+거리 기준은 중앙 카메라 광학 원점과 목표 포트이다. 실패한 단계 이후 이벤트는 발생하지 않으며
+종료 이벤트의 status/detail로 이유를 확인한다. 시작 로그만 남으면 그 단계가 진행 중이거나 중단된 상태다.
+`SETUP_STARTED`/`SETUP_FINISHED`는 첫 case 이전 TF·초기 lift 상태다.
+실시간 확인은 별도 호스트 터미널에서 `tail -F <출력 디렉터리>/protocol.log`로 한다.
+소스 변경 후에는 새로운 경로에 plan을 다시 생성해야 한다. `--distrobox` 값은 `aic_eval_physic`이다.
+`plan --output <새 경로> --distrobox aic_eval_physic`로 계획을 생성한 뒤 `run --plan <새 경로>/plan.json`을 실행한다.
+`--distrobox`만 쓰면 인자 오류이며, 이미 존재하는 plan 출력 디렉터리도 덮어쓰지 않는다.
+`protocol.log`는 실행 사전 검사 통과 후 생성된다. 해시 불일치 등 사전 검사 오류는 터미널에서 확인한다.
+runner 종료 코드 0은 모든 조건 성공이 아니라 기록 완료를 뜻한다. `captured` 수와 각 실패 status를 함께 확인한다.
+
 ```bash
 PLAN=evidence/triangulation/protocol/plan.json
 PYTHONDONTWRITEBYTECODE=1 ws_aic/src/.pixi/envs/default/bin/python3 \
@@ -79,10 +94,19 @@ PYTHONDONTWRITEBYTECODE=1 ws_aic/src/.pixi/envs/default/bin/python3 \
   scripts/run_triangulation_protocol.py run --plan "$PLAN" \
   --output evidence/triangulation/gpu-smoke --renderer gpu --smoke
 
+# GUI/RViz 확인용: host DISPLAY가 필요하며 한 job만 실행한다.
+PYTHONDONTWRITEBYTECODE=1 ws_aic/src/.pixi/envs/default/bin/python3 \
+  scripts/run_triangulation_protocol.py run --plan "$PLAN" \
+  --output evidence/triangulation/gpu-gui-smoke --renderer gpu \
+  --job-indices 0 --visualize
+
 # 전체 100배치 / 300 simulator job / 2,700관측
 PYTHONDONTWRITEBYTECODE=1 ws_aic/src/.pixi/envs/default/bin/python3 \
   scripts/run_triangulation_protocol.py run --plan "$PLAN" \
   --output evidence/triangulation/gpu-full --renderer gpu
+
+# 별도 터미널에서 실행 중 job·거리·각도·light·case 결과 확인
+tail -F evidence/triangulation/gpu-full/protocol.log
 
 # 중단 재개: 계획·출력·job 선택·renderer를 그대로 유지하고 --resume만 추가한다.
 PYTHONDONTWRITEBYTECODE=1 ws_aic/src/.pixi/envs/default/bin/python3 \

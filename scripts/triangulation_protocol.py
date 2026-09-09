@@ -4,6 +4,7 @@
 # 관측 평면은 포트 로컬 XZ, 중앙 카메라 optical +Z가 목표 중심을 향한다.
 from __future__ import annotations
 
+from datetime import datetime
 import hashlib
 import itertools
 import json
@@ -20,6 +21,21 @@ PREFIX = ROOT / 'ws_aic/src/.pixi/envs/default'
 sys.path[:0] = [str(ROOT/'ws_aic/src/phy/phy_data_collection'),
                 str(ROOT/'ws_aic/src/phy/phy_policy')]
 CAMERAS = ('left', 'center', 'right')
+
+
+def append_protocol_log(path, event, **fields):
+    """job 조건과 결과를 즉시 JSON Lines로 기록해 중단 시점도 추적한다."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        'timestamp': datetime.now().astimezone().isoformat(timespec='seconds'),
+        'event': event,
+        **fields,
+    }
+    with path.open('a', encoding='utf-8') as stream:
+        stream.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + '\n')
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def configure_environment():
