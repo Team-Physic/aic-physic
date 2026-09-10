@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 # 고정 프로토콜로 저장한 실제 영상과 카메라 행렬을 현재 PortVision으로 재평가한다.
-# 가시성 조건을 충족한 모든 사례를 분모에 넣고 미검출도 실패로 보존한다.
+# 평가 완료된 적격 사례를 분모로 사용하며 중단·완료 시 표와 그래프를 저장한다.
 # GT는 채점과 계산 전용 비교 경로에만 사용하며 YOLO 입력은 원본 BGR 영상이다.
 # 원본 NPZ·모델 해시, 검출 bbox 영상과 mm 오차를 기록하여 GPU PC에서도 재검증한다.
+# 인자: --resume은 동일 설정의 완료 case를 재사용하며 기본값은 비활성이다.
 # 인자: --capture/--output 필수 경로, --weights 기본 ws_aic/model/best.pt, --device 기본 cpu(GPU는 0).
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+import hashlib
+import inspect
+import signal
 import json
 import os
 from pathlib import Path
 import sys
 
+from triangulation_report import summary, load_capture, aggregate, write_report
 from triangulation_protocol import ROOT, PREFIX, CAMERAS, digest, write_json, configure_environment
 configure_environment()
 os.environ.setdefault('AMENT_PREFIX_PATH', str(PREFIX))
@@ -35,19 +39,6 @@ class ReplayLogger:
         pass
     def warn(self, message):
         print(message)
-
-
-def summary(rows):
-    """관측 불충족과 관측 충족 후 알고리즘 실패를 서로 다른 분모로 보고한다."""
-    eligible = [r for r in rows if r.get('eligible', False)]
-    errors = [r['error_mm'] for r in eligible if r.get('error_mm') is not None]
-    return {'planned_cases':len(rows), 'eligible_cases':len(eligible),
-            'observation_failures':dict(Counter(r['status'] for r in rows if not r.get('eligible',False))),
-            'estimates':len(errors), 'estimate_rate':len(errors)/len(eligible) if eligible else None,
-            'detection_failures':dict(Counter(r['status'] for r in eligible if r['status']!='ok')),
-            'median_mm':float(np.median(errors)) if errors else None,
-            'p95_mm':float(np.percentile(errors,95)) if errors else None,
-            'max_mm':max(errors) if errors else None}
 
 
 def evaluate_case(folder, row, model, output):
@@ -88,57 +79,109 @@ def evaluate_case(folder, row, model, output):
     return result
 
 
+def source_provenance(plan):
+    """알려진 보고 전용 업그레이드만 허용하며 검출 함수와 나머지 소스 해시는 고정한다."""
+    upgrades = {}
+    for name, expected in plan['source_sha256'].items():
+        actual = digest(ROOT/name)
+        if actual == expected:
+            continue
+        legacy = (name == 'scripts/evaluate_triangulation_protocol.py' and
+                  expected == '83b8fe385077d018613ffc5da777ef996b820445db84d9c9a8821ced954e3f94' and
+                  hashlib.sha256(inspect.getsource(evaluate_case).rstrip().encode()).hexdigest() == '6fc2d7174298e703e71d1d03a3c583535d0e6ecb0140eacaf225c0f2c96ca932')
+        if not legacy:
+            raise ValueError(f'source differs from frozen plan: {name}')
+        upgrades[name] = dict(frozen=expected, current=actual, reason='reporting upgrade; evaluate_case unchanged')
+    return upgrades
+
+
+def process(args, plan, run, provenance, evaluator=evaluate_case, model_factory=YOLO):
+    """case JSON을 먼저 확정하고 중단 시 디스크 기준으로 부분 보고서를 만든다."""
+    rows, jobs = load_capture(args.capture, plan, run)
+    state, model = 'completed', None
+    def restore(row):
+        path = args.output/f'{row["id"]}.json'
+        if path.is_file():
+            saved = json.loads(path.read_text())
+            if saved.get('input_sha256') == row['input_sha256']:
+                return saved
+        return row
+    for row in rows:
+        row['input_sha256'] = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
+    try:
+        for i, row in enumerate(rows):
+            if row.get('eligible'):
+                archive = args.capture/f'job_{row["job_index"]:03d}'/row['archive']
+                if not archive.resolve().is_relative_to(args.capture.resolve()):
+                    raise ValueError(f'archive outside capture: {archive}')
+                if digest(archive) != row['archive_sha256']:
+                    raise ValueError(f'capture archive changed: {archive}')
+            saved = restore(row)
+            if saved['evaluation_state'] != 'pending':
+                rows[i] = saved
+                continue
+            print(f'[{i+1}/{len(rows)}] job={row["job_index"]} {row["id"]} '
+                  f'distance={row["distance_m"]}m angle={row["angle_deg"]}deg light={row["light_scale"]}', flush=True)
+            if row['eligible'] and model is None:
+                model = model_factory(str(args.weights))
+            result = evaluator(args.capture/f'job_{row["job_index"]:03d}', row, model, args.output)
+            result['evaluation_state'] = 'evaluated' if row['eligible'] else 'skipped'
+            write_json(args.output/f'{row["id"]}.json', result)
+            rows[i] = result
+    except KeyboardInterrupt:
+        state = 'interrupted'
+    except Exception as error:
+        state = 'failed'
+        provenance['error'] = f'{type(error).__name__}: {error}'
+        raise
+    finally:
+        # 저장 완료 직후의 SIGINT도 복구한다. 보고서 확정 중 두 번째 SIGINT는 무시한다.
+        previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            rows = [restore(row) for row in rows]
+            report = aggregate(plan, rows, jobs, state, provenance)
+            write_report(args.output, report, rows)
+            print(f'{state}: {args.output / "report.html"}', flush=True)
+        finally:
+            signal.signal(signal.SIGINT, previous)
+    return 130 if state == 'interrupted' else 0
+
+
 def main():
-    """소스와 모델을 확인한 뒤 원본 capture를 바꾸지 않고 새 결과 경로에 저장한다."""
+    """동일 계획·모델·장치·평가 코드에서만 완료 case를 재사용한다."""
     parser = argparse.ArgumentParser()
     parser.add_argument('--capture',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--weights',type=Path,default=ROOT/'ws_aic/model/best.pt')
     parser.add_argument('--device',default='cpu')
+    parser.add_argument('--resume',action='store_true')
     args = parser.parse_args()
-    if args.output.exists():
-        parser.error('--output must be a new directory')
     plan = json.loads((args.capture/'plan.json').read_text())
     if digest(args.weights) != plan['model_sha256']:
         parser.error('model differs from frozen plan')
-    for name, expected in plan['source_sha256'].items():
-        if digest(ROOT/name) != expected:
-            parser.error(f'source differs from frozen plan: {name}')
+    upgrades = source_provenance(plan)
+    run = json.loads((args.capture/'run.json').read_text())
+    signature = dict(plan_sha256=digest(args.capture/'plan.json'), model_sha256=digest(args.weights),
+                     device=args.device, torch=torch.__version__, cuda=torch.version.cuda, opencv=cv2.__version__,
+                     selected_cases=run['selected_cases'],
+                     evaluator_sha256=digest(Path(__file__)),
+                     report_sha256=digest(ROOT/'scripts/triangulation_report.py'))
+    manifest = args.output/'evaluation.json'
+    if args.resume:
+        if not manifest.is_file() or json.loads(manifest.read_text()) != signature:
+            parser.error('--resume requires matching evaluation.json (plan/model/device/code/selection)')
+    elif args.output.exists():
+        parser.error('--output must be new; use --resume for an existing compatible evaluation')
+    args.output.mkdir(parents=True, exist_ok=True)
+    write_json(manifest, signature)
     os.environ['AIC_YOLO_DEVICE'] = args.device
     os.environ.update(AIC_YOLO_CONFIDENCE='0.8',AIC_YOLO_KEYPOINT_CONFIDENCE='0.25',
                       AIC_TRIANGULATION_REPROJECTION_MAX_PX='30',
                       AIC_FINAL_POLICY_WORKSPACE_MIN='-1.0,-1.0,-0.1',AIC_FINAL_POLICY_WORKSPACE_MAX='1.0,1.0,1.5')
     torch.set_num_threads(4)
-    args.output.mkdir(parents=True)
-    model = YOLO(str(args.weights))
-    rows = []
-    run = json.loads((args.capture/'run.json').read_text())
-    for index, expected in run['selected_cases'].items():
-        folder = args.capture/f'job_{int(index):03d}'
-        complete = folder/'complete.json'
-        recorded = {r['id']:r for r in json.loads(complete.read_text())['cases']} if complete.exists() else {}
-        for case in expected:
-            row = recorded.get(case['id'],dict(case,status='not_recorded'))
-            result = evaluate_case(folder,row,model,args.output)
-            rows.append(result)
-            write_json(args.output/f'{row["id"]}.json',result)
-    if not rows:
-        raise ValueError('no completed capture jobs')
-    report = {'scope':'fixed Gazebo observations; no physical insertion; software and GPU renders may differ',
-              'argv':sys.argv,'plan_sha256':digest(args.capture/'plan.json'),'model_sha256':digest(args.weights),
-              'torch':torch.__version__,'cuda':torch.version.cuda,'opencv':cv2.__version__,
-              'device':str(getattr(model.predictor,'device',args.device)),
-              'capture_run':json.loads((args.capture/'run.json').read_text()),
-              'overall':summary(rows),
-              'by_card_count':{str(n):summary([r for r in rows if r.get('card_count')==n]) for n in range(1,6)},
-              'by_condition':{key:{str(value):summary([r for r in rows if r.get(key)==value]) for value in values}
-                              for key,values in [('distance_m',plan['distances_m']),('angle_deg',plan['angles_deg']),('light_scale',plan['light_scales'])]},
-              'geometry':{'eligible_cases':sum(bool(r.get('eligible')) for r in rows),
-                          'estimates':sum(r.get('geometry_error_mm') is not None for r in rows),
-                          'max_mm':max((r['geometry_error_mm'] for r in rows if r.get('geometry_error_mm') is not None),default=None)}}
-    write_json(args.output/'summary.json',report)
-    print(json.dumps(report['overall'],ensure_ascii=False,indent=2))
+    provenance = dict(signature, argv=sys.argv, capture_run=run, reporting_upgrades=upgrades)
+    return process(args, plan, run, provenance)
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

@@ -1,0 +1,2 @@
+﻿id,job_index,card_count,target,distance_m,angle_deg,light_scale,capture_status,evaluation_state,status,error_mm,geometry_error_mm
+layout_000_l1_d1_a1,268,1,SFP_00,0.45,0,1,captured,evaluated,fewer_than_two_detections,,1.7554167342883506e-13

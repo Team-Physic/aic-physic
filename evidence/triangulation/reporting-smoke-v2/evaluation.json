@@ -1,0 +1,24 @@
+{
+  "plan_sha256": "2dc72dc41025595f796cfef3ac0052a0b73b9fc6b405ad8ff0aa4fb2cd0f266d",
+  "model_sha256": "ed559c45049fe0caaf3ed98012fef124474e98c4f7be3feb8e653bc520b45380",
+  "device": "cpu",
+  "torch": "2.7.1+cu126",
+  "cuda": "12.6",
+  "opencv": "4.13.0",
+  "selected_cases": {
+    "268": [
+      {
+        "id": "layout_000_l1_d1_a1",
+        "layout_id": "layout_000",
+        "light_index": 1,
+        "light_scale": 1,
+        "distance_m": 0.45,
+        "angle_deg": 0,
+        "target": "SFP_00",
+        "card_count": 1
+      }
+    ]
+  },
+  "evaluator_sha256": "9aca9c577b790ff3f3bad3a76b5f45450461ac27626f0eaf559b83468485e979",
+  "report_sha256": "edaf17d4f865ee563b29469fdb411306b059b6b0f7307fbe1fc0dad413393967"
+}

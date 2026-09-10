@@ -183,3 +183,12 @@ visibility 후처리를 제공합니다. 자세한 사용법은
 
 브랜치 이름과 영어 커밋 메시지 형식은
 [`docs/git-conventions.md`](docs/git-conventions.md)를 따릅니다.
+
+## 고정 삼각측량 평가 보고서
+
+실행 절차는 [PROTOCOL.md](evidence/triangulation/PROTOCOL.md)를 따른다.
+`evaluate_triangulation_protocol.py`는 case를 개별 저장하며, Ctrl+C와 정상 완료 시
+`summary.json`, CSV 5종, `overview.png`, 독립 `report.html`을 생성한다.
+동일 명령에 `--resume`을 추가하면 동일 입력의 완료 case를 재사용한다.
+부분 보고서의 위치 산출률 분모는 **평가 완료된 적격 관측**이며 미평가 case는 실패로 세지 않는다.
+계획·실행 시도·보드 관측·평가 수와 카드 조합별 job/고유 배치 수를 구분한다.

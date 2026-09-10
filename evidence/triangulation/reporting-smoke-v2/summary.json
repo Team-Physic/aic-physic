@@ -1,0 +1,1875 @@
+{
+  "schema": 1,
+  "state": "completed",
+  "generated_at": "2026-09-10T14:07:55.207390+09:00",
+  "coverage_complete": true,
+  "counts": {
+    "full_plan_layouts": 100,
+    "full_plan_jobs": 300,
+    "full_plan_cases": 2700,
+    "selected_jobs": 1,
+    "selected_layouts": 1,
+    "attempted_jobs": 1,
+    "board_observed_jobs": 1,
+    "observed_unique_layouts": 1,
+    "captured_cases": 1,
+    "processed_cases": 1,
+    "selected_cases": 1
+  },
+  "overall": {
+    "planned_cases": 1,
+    "eligible_cases": 1,
+    "evaluated_eligible_cases": 1,
+    "pending_eligible_cases": 0,
+    "estimates": 0,
+    "estimate_rate": 0.0,
+    "observation_failures": {},
+    "detection_failures": {
+      "fewer_than_two_detections": 1
+    },
+    "median_mm": null,
+    "p95_mm": null,
+    "max_mm": null
+  },
+  "by_card_count": {
+    "1": {
+      "planned_cases": 1,
+      "eligible_cases": 1,
+      "evaluated_eligible_cases": 1,
+      "pending_eligible_cases": 0,
+      "estimates": 0,
+      "estimate_rate": 0.0,
+      "observation_failures": {},
+      "detection_failures": {
+        "fewer_than_two_detections": 1
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null
+    },
+    "2": {
+      "planned_cases": 0,
+      "eligible_cases": 0,
+      "evaluated_eligible_cases": 0,
+      "pending_eligible_cases": 0,
+      "estimates": 0,
+      "estimate_rate": null,
+      "observation_failures": {},
+      "detection_failures": {},
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null
+    },
+    "3": {
+      "planned_cases": 0,
+      "eligible_cases": 0,
+      "evaluated_eligible_cases": 0,
+      "pending_eligible_cases": 0,
+      "estimates": 0,
+      "estimate_rate": null,
+      "observation_failures": {},
+      "detection_failures": {},
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null
+    },
+    "4": {
+      "planned_cases": 0,
+      "eligible_cases": 0,
+      "evaluated_eligible_cases": 0,
+      "pending_eligible_cases": 0,
+      "estimates": 0,
+      "estimate_rate": null,
+      "observation_failures": {},
+      "detection_failures": {},
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null
+    },
+    "5": {
+      "planned_cases": 0,
+      "eligible_cases": 0,
+      "evaluated_eligible_cases": 0,
+      "pending_eligible_cases": 0,
+      "estimates": 0,
+      "estimate_rate": null,
+      "observation_failures": {},
+      "detection_failures": {},
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null
+    }
+  },
+  "by_condition": {
+    "distance_m": {
+      "0.35": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "0.45": {
+        "planned_cases": 1,
+        "eligible_cases": 1,
+        "evaluated_eligible_cases": 1,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": 0.0,
+        "observation_failures": {},
+        "detection_failures": {
+          "fewer_than_two_detections": 1
+        },
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "0.55": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      }
+    },
+    "angle_deg": {
+      "-15": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "0": {
+        "planned_cases": 1,
+        "eligible_cases": 1,
+        "evaluated_eligible_cases": 1,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": 0.0,
+        "observation_failures": {},
+        "detection_failures": {
+          "fewer_than_two_detections": 1
+        },
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "15": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      }
+    },
+    "light_scale": {
+      "0.7": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "1": {
+        "planned_cases": 1,
+        "eligible_cases": 1,
+        "evaluated_eligible_cases": 1,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": 0.0,
+        "observation_failures": {},
+        "detection_failures": {
+          "fewer_than_two_detections": 1
+        },
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "1.3": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      }
+    },
+    "target": {
+      "SFP_00": {
+        "planned_cases": 1,
+        "eligible_cases": 1,
+        "evaluated_eligible_cases": 1,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": 0.0,
+        "observation_failures": {},
+        "detection_failures": {
+          "fewer_than_two_detections": 1
+        },
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_01": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_10": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_11": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_20": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_21": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_30": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_31": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_40": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      },
+      "SFP_41": {
+        "planned_cases": 0,
+        "eligible_cases": 0,
+        "evaluated_eligible_cases": 0,
+        "pending_eligible_cases": 0,
+        "estimates": 0,
+        "estimate_rate": null,
+        "observation_failures": {},
+        "detection_failures": {},
+        "median_mm": null,
+        "p95_mm": null,
+        "max_mm": null
+      }
+    }
+  },
+  "geometry": {
+    "estimates": 1,
+    "median_mm": 1.7554167342883506e-13,
+    "p95_mm": 1.7554167342883506e-13,
+    "max_mm": 1.7554167342883506e-13
+  },
+  "randomization": {
+    "seed": 20260909,
+    "distances_m": [
+      0.35,
+      0.45,
+      0.55
+    ],
+    "angles_deg": [
+      -15,
+      0,
+      15
+    ],
+    "light_scales": [
+      0.7,
+      1,
+      1.3
+    ],
+    "configured_limits": {
+      "nic_rail": {
+        "min_translation": -0.0215,
+        "max_translation": 0.0234
+      },
+      "sc_rail": {
+        "min_translation": -0.06,
+        "max_translation": 0.055
+      },
+      "mount_rail": {
+        "min_translation": -0.09425,
+        "max_translation": 0.09425
+      }
+    },
+    "sampled_ranges": [
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.pose.x",
+        "minimum": 0.1304572051753781,
+        "maximum": 0.16989528548870994,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.pose.y",
+        "minimum": -0.24913218643945426,
+        "maximum": -0.20039413521983349,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.pose.z",
+        "minimum": 1.14,
+        "maximum": 1.14,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.pose.yaw",
+        "minimum": 3.100073109490538,
+        "maximum": 3.141453118194154,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.translation",
+        "minimum": -0.021123577027344517,
+        "maximum": 0.023045638063820602,
+        "samples": 55
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 55
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 55
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 55
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_1.entity_pose.translation",
+        "minimum": -0.02107675304454016,
+        "maximum": 0.02314271374530323,
+        "samples": 65
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_1.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 65
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_1.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 65
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_1.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 65
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.translation",
+        "minimum": -0.05917669542082392,
+        "maximum": 0.0548840450113192,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.x",
+        "minimum": -0.001960737189899018,
+        "maximum": 0.0018102513466121202,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.y",
+        "minimum": 0.01343387829129667,
+        "maximum": 0.017314539435736156,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.z",
+        "minimum": 0.04050664864416269,
+        "maximum": 0.04442404401816159,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.cables.cable_0.pose.roll",
+        "minimum": 0.4027660707790616,
+        "maximum": 0.48313777042957823,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.cables.cable_0.pose.pitch",
+        "minimum": -0.5196390389238468,
+        "maximum": -0.4520376078022964,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.cables.cable_0.pose.yaw",
+        "minimum": 1.2933787128120502,
+        "maximum": 1.3693746093251886,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "robot.home_joint_positions.shoulder_pan_joint",
+        "minimum": -0.22733366557300122,
+        "maximum": -0.08994943200406567,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "robot.home_joint_positions.shoulder_lift_joint",
+        "minimum": -1.423307938515469,
+        "maximum": -1.2885514105991327,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "robot.home_joint_positions.elbow_joint",
+        "minimum": -1.7340775665779344,
+        "maximum": -1.5961503581698089,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "robot.home_joint_positions.wrist_1_joint",
+        "minimum": -1.7595374262177625,
+        "maximum": -1.6248397309542815,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "robot.home_joint_positions.wrist_2_joint",
+        "minimum": 1.501581445028189,
+        "maximum": 1.6391031355104155,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "robot.home_joint_positions.wrist_3_joint",
+        "minimum": 1.3414530109999048,
+        "maximum": 1.4754826066460258,
+        "samples": 100
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_2.entity_pose.translation",
+        "minimum": -0.021136691079664333,
+        "maximum": 0.022155604221817074,
+        "samples": 61
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_2.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 61
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_2.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 61
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_2.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 61
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_4.entity_pose.translation",
+        "minimum": -0.020360212217964857,
+        "maximum": 0.02221076037524026,
+        "samples": 62
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_4.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 62
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_4.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 62
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_4.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 62
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_3.entity_pose.translation",
+        "minimum": -0.02148837075563372,
+        "maximum": 0.023326271623110184,
+        "samples": 57
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_3.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 57
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_3.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 57
+      },
+      {
+        "scope": "planned",
+        "parameter": "scene.task_board.nic_rail_3.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 57
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.pose.x",
+        "minimum": 0.13641770862733982,
+        "maximum": 0.13641770862733982,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.pose.y",
+        "minimum": -0.20101707950383818,
+        "maximum": -0.20101707950383818,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.pose.z",
+        "minimum": 1.14,
+        "maximum": 1.14,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.pose.yaw",
+        "minimum": 3.1225274644282135,
+        "maximum": 3.1225274644282135,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.translation",
+        "minimum": -0.0002804109536908919,
+        "maximum": -0.0002804109536908919,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.translation",
+        "minimum": -0.009997127708038706,
+        "maximum": -0.009997127708038706,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.x",
+        "minimum": -0.0008418905533414528,
+        "maximum": -0.0008418905533414528,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.y",
+        "minimum": 0.016203544536904337,
+        "maximum": 0.016203544536904337,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.z",
+        "minimum": 0.04140154305330597,
+        "maximum": 0.04140154305330597,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.cables.cable_0.pose.roll",
+        "minimum": 0.4745753406604025,
+        "maximum": 0.4745753406604025,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.cables.cable_0.pose.pitch",
+        "minimum": -0.46246399163584506,
+        "maximum": -0.46246399163584506,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "scene.cables.cable_0.pose.yaw",
+        "minimum": 1.3240727635423966,
+        "maximum": 1.3240727635423966,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "robot.home_joint_positions.shoulder_pan_joint",
+        "minimum": -0.22733366557300122,
+        "maximum": -0.22733366557300122,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "robot.home_joint_positions.shoulder_lift_joint",
+        "minimum": -1.299576963122503,
+        "maximum": -1.299576963122503,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "robot.home_joint_positions.elbow_joint",
+        "minimum": -1.6729344938734276,
+        "maximum": -1.6729344938734276,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "robot.home_joint_positions.wrist_1_joint",
+        "minimum": -1.7302011581215566,
+        "maximum": -1.7302011581215566,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "robot.home_joint_positions.wrist_2_joint",
+        "minimum": 1.5715928823290655,
+        "maximum": 1.5715928823290655,
+        "samples": 1
+      },
+      {
+        "scope": "selected",
+        "parameter": "robot.home_joint_positions.wrist_3_joint",
+        "minimum": 1.4071194995306846,
+        "maximum": 1.4071194995306846,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.pose.x",
+        "minimum": 0.13641770862733982,
+        "maximum": 0.13641770862733982,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.pose.y",
+        "minimum": -0.20101707950383818,
+        "maximum": -0.20101707950383818,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.pose.z",
+        "minimum": 1.14,
+        "maximum": 1.14,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.pose.yaw",
+        "minimum": 3.1225274644282135,
+        "maximum": 3.1225274644282135,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.translation",
+        "minimum": -0.0002804109536908919,
+        "maximum": -0.0002804109536908919,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.nic_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.translation",
+        "minimum": -0.009997127708038706,
+        "maximum": -0.009997127708038706,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sc_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.lc_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sfp_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.sc_mount_rail_0.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.translation",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.roll",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.pitch",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.task_board.lc_mount_rail_1.entity_pose.yaw",
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.x",
+        "minimum": -0.0008418905533414528,
+        "maximum": -0.0008418905533414528,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.y",
+        "minimum": 0.016203544536904337,
+        "maximum": 0.016203544536904337,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.cables.cable_0.pose.gripper_offset.z",
+        "minimum": 0.04140154305330597,
+        "maximum": 0.04140154305330597,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.cables.cable_0.pose.roll",
+        "minimum": 0.4745753406604025,
+        "maximum": 0.4745753406604025,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.cables.cable_0.pose.pitch",
+        "minimum": -0.46246399163584506,
+        "maximum": -0.46246399163584506,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "scene.cables.cable_0.pose.yaw",
+        "minimum": 1.3240727635423966,
+        "maximum": 1.3240727635423966,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "robot.home_joint_positions.shoulder_pan_joint",
+        "minimum": -0.22733366557300122,
+        "maximum": -0.22733366557300122,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "robot.home_joint_positions.shoulder_lift_joint",
+        "minimum": -1.299576963122503,
+        "maximum": -1.299576963122503,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "robot.home_joint_positions.elbow_joint",
+        "minimum": -1.6729344938734276,
+        "maximum": -1.6729344938734276,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "robot.home_joint_positions.wrist_1_joint",
+        "minimum": -1.7302011581215566,
+        "maximum": -1.7302011581215566,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "robot.home_joint_positions.wrist_2_joint",
+        "minimum": 1.5715928823290655,
+        "maximum": 1.5715928823290655,
+        "samples": 1
+      },
+      {
+        "scope": "board_observed",
+        "parameter": "robot.home_joint_positions.wrist_3_joint",
+        "minimum": 1.4071194995306846,
+        "maximum": 1.4071194995306846,
+        "samples": 1
+      }
+    ]
+  },
+  "combinations": [
+    {
+      "card_mask": "00001",
+      "active_rails": "0",
+      "card_count": 1,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 1,
+      "selected_unique_layouts": 1,
+      "attempted_jobs": 1,
+      "board_observed_jobs": 1,
+      "observed_unique_layouts": 1,
+      "captured_cases": 1
+    },
+    {
+      "card_mask": "00010",
+      "active_rails": "1",
+      "card_count": 1,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "00011",
+      "active_rails": "0,1",
+      "card_count": 2,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "00100",
+      "active_rails": "2",
+      "card_count": 1,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "00101",
+      "active_rails": "0,2",
+      "card_count": 2,
+      "planned_unique_layouts": 1,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "00110",
+      "active_rails": "1,2",
+      "card_count": 2,
+      "planned_unique_layouts": 1,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "00111",
+      "active_rails": "0,1,2",
+      "card_count": 3,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "01000",
+      "active_rails": "3",
+      "card_count": 1,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "01001",
+      "active_rails": "0,3",
+      "card_count": 2,
+      "planned_unique_layouts": 2,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "01010",
+      "active_rails": "1,3",
+      "card_count": 2,
+      "planned_unique_layouts": 0,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "01011",
+      "active_rails": "0,1,3",
+      "card_count": 3,
+      "planned_unique_layouts": 2,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "01100",
+      "active_rails": "2,3",
+      "card_count": 2,
+      "planned_unique_layouts": 2,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "01101",
+      "active_rails": "0,2,3",
+      "card_count": 3,
+      "planned_unique_layouts": 1,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "01110",
+      "active_rails": "1,2,3",
+      "card_count": 3,
+      "planned_unique_layouts": 3,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "01111",
+      "active_rails": "0,1,2,3",
+      "card_count": 4,
+      "planned_unique_layouts": 2,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "10000",
+      "active_rails": "4",
+      "card_count": 1,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "10001",
+      "active_rails": "0,4",
+      "card_count": 2,
+      "planned_unique_layouts": 1,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "10010",
+      "active_rails": "1,4",
+      "card_count": 2,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "10011",
+      "active_rails": "0,1,4",
+      "card_count": 3,
+      "planned_unique_layouts": 1,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "10100",
+      "active_rails": "2,4",
+      "card_count": 2,
+      "planned_unique_layouts": 2,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "10101",
+      "active_rails": "0,2,4",
+      "card_count": 3,
+      "planned_unique_layouts": 3,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "10110",
+      "active_rails": "1,2,4",
+      "card_count": 3,
+      "planned_unique_layouts": 1,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "10111",
+      "active_rails": "0,1,2,4",
+      "card_count": 4,
+      "planned_unique_layouts": 5,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "11000",
+      "active_rails": "3,4",
+      "card_count": 2,
+      "planned_unique_layouts": 3,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "11001",
+      "active_rails": "0,3,4",
+      "card_count": 3,
+      "planned_unique_layouts": 0,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "11010",
+      "active_rails": "1,3,4",
+      "card_count": 3,
+      "planned_unique_layouts": 4,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "11011",
+      "active_rails": "0,1,3,4",
+      "card_count": 4,
+      "planned_unique_layouts": 2,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "11100",
+      "active_rails": "2,3,4",
+      "card_count": 3,
+      "planned_unique_layouts": 1,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "11101",
+      "active_rails": "0,2,3,4",
+      "card_count": 4,
+      "planned_unique_layouts": 3,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "11110",
+      "active_rails": "1,2,3,4",
+      "card_count": 4,
+      "planned_unique_layouts": 8,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    },
+    {
+      "card_mask": "11111",
+      "active_rails": "0,1,2,3,4",
+      "card_count": 5,
+      "planned_unique_layouts": 20,
+      "selected_jobs": 0,
+      "selected_unique_layouts": 0,
+      "attempted_jobs": 0,
+      "board_observed_jobs": 0,
+      "observed_unique_layouts": 0,
+      "captured_cases": 0
+    }
+  ],
+  "jobs": [
+    {
+      "job_index": 268,
+      "layout_id": "layout_000",
+      "card_count": 1,
+      "target": "SFP_00",
+      "active_rails": [
+        0
+      ],
+      "card_mask": "00001",
+      "light_scale": 1,
+      "attempted": true,
+      "board_observed": true,
+      "attempts": 1,
+      "recorded_cases": 1,
+      "captured_cases": 1
+    }
+  ],
+  "provenance": {
+    "plan_sha256": "2dc72dc41025595f796cfef3ac0052a0b73b9fc6b405ad8ff0aa4fb2cd0f266d",
+    "model_sha256": "ed559c45049fe0caaf3ed98012fef124474e98c4f7be3feb8e653bc520b45380",
+    "device": "cpu",
+    "torch": "2.7.1+cu126",
+    "cuda": "12.6",
+    "opencv": "4.13.0",
+    "selected_cases": {
+      "268": [
+        {
+          "id": "layout_000_l1_d1_a1",
+          "layout_id": "layout_000",
+          "light_index": 1,
+          "light_scale": 1,
+          "distance_m": 0.45,
+          "angle_deg": 0,
+          "target": "SFP_00",
+          "card_count": 1
+        }
+      ]
+    },
+    "evaluator_sha256": "9aca9c577b790ff3f3bad3a76b5f45450461ac27626f0eaf559b83468485e979",
+    "report_sha256": "edaf17d4f865ee563b29469fdb411306b059b6b0f7307fbe1fc0dad413393967",
+    "argv": [
+      "scripts/evaluate_triangulation_protocol.py",
+      "--capture",
+      "evidence/triangulation/logging-check-v2",
+      "--output",
+      "evidence/triangulation/reporting-smoke-v2",
+      "--device",
+      "cpu",
+      "--resume"
+    ],
+    "capture_run": {
+      "signature": {
+        "plan_sha256": "2dc72dc41025595f796cfef3ac0052a0b73b9fc6b405ad8ff0aa4fb2cd0f266d",
+        "renderer": "gpu",
+        "visualize": false,
+        "smoke": true,
+        "timeout_s": 20.0
+      },
+      "selected_cases": {
+        "268": [
+          {
+            "id": "layout_000_l1_d1_a1",
+            "layout_id": "layout_000",
+            "light_index": 1,
+            "light_scale": 1,
+            "distance_m": 0.45,
+            "angle_deg": 0,
+            "target": "SFP_00",
+            "card_count": 1
+          }
+        ]
+      },
+      "argv": [
+        "scripts/run_triangulation_protocol.py",
+        "run",
+        "--plan",
+        "evidence/triangulation/protocol-logging-check-v2/plan.json",
+        "--output",
+        "evidence/triangulation/logging-check-v2",
+        "--renderer",
+        "gpu",
+        "--smoke",
+        "--timeout-s",
+        "20"
+      ],
+      "python": "3.12.12 | packaged by conda-forge | (main, Jan 26 2026, 23:51:32) [GCC 14.3.0]",
+      "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+      "gpu": "NVIDIA GeForce GTX 1050, 580.173.02, 4096 MiB",
+      "engine_image_id": "sha256:9aa2ffdbb946d38edde1bac7b5f02a44cfbea26e3b04a9c74e09f14c97472923"
+    },
+    "reporting_upgrades": {
+      "scripts/evaluate_triangulation_protocol.py": {
+        "frozen": "83b8fe385077d018613ffc5da777ef996b820445db84d9c9a8821ced954e3f94",
+        "current": "9aca9c577b790ff3f3bad3a76b5f45450461ac27626f0eaf559b83468485e979",
+        "reason": "reporting upgrade; evaluate_case unchanged"
+      }
+    }
+  }
+}

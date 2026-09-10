@@ -46,7 +46,9 @@ NIC 1~5장 × 목표 SFP_00~SFP_41 10종 × 독립 배치 2회 = **100개 배치
 | `scripts/triangulation_protocol.py` | `make_plan`: 균등 랜덤 배치·world 동결. `cases`: 고정 조건 ID. `look_at_tcp`: 목표 중심 관측 자세. `visibility`: 여백·depth 검사. `job_complete`: 조건 누락·인프라 실패 판정. `configure_environment`: 외부 설정 격리. `digest`/`write_json`: 입력 식별·원자적 기록 |
 | `scripts/run_triangulation_protocol.py` | `source_hashes`/`installed_hashes`/`freeze_plan`: 소스·실제 설치 파일·이미지 버전 고정. `launcher_environment`: ROS lock·렌더러 격리. `run_plan`: job 실행·resume·이력 보존. `main`: CLI 검증 |
 | `scripts/TriangulationCollect.py` | `matrix`: TF 행렬 변환. `TriangulationCollect.__init__`: 계획·기존 센서 구독. `capture_case`: 도달·정지·동기화·가시성·NPZ 저장. `insert_cable`: 고정 반복·모든 종료 상태 기록, 실제 삽입 성공 반환하지 않음 |
-| `scripts/evaluate_triangulation_protocol.py` | `evaluate_case`: 현재 PortVision 추론과 GT 계산 경로 분리. `summary`: 적격 관측의 실패 포함 통계. `main`: 입력 검증·누락 조건 집계·결과 저장. `ReplayLogger`: 추론 로그 인터페이스 |
+| `scripts/evaluate_triangulation_protocol.py` | `evaluate_case`: 현재 PortVision 추론과 GT 계산 경로 분리. `process`: case 저장·SIGINT 보고·재개. `source_provenance`/`main`: 소스·모델·재개 계약 검증. `ReplayLogger`: 추론 로그 인터페이스 |
+| `scripts/triangulation_report.py` | `load_capture`: 최신 attempt 복구. `summary`/`aggregate`: 부분·최종 통계. `write_report`: JSON·CSV·PNG·HTML 저장 |
+| `scripts/test_triangulation_report.py` | 실제 SIGINT, 부분 분모, 재개·입력 변경, 최신 attempt 복구 검사 |
 | `scripts/test_triangulation_protocol.py` | 균등 배정·난수 재현·2,700 ID·조명·look-at·가림·중단 복구 검사 |
 
 기존 `capture_triangulation_cases.py`와 `evaluate_triangulation.py`는 이전 recorded-baseline 재현용이다.
@@ -124,6 +126,36 @@ PYTHONDONTWRITEBYTECODE=1 ws_aic/src/.pixi/envs/default/bin/python3 \
 인프라 실패 job은 새로운 attempt 디렉터리에서 다시 실행하며, 이전 기록은 유지한다.
 관측 불충족·미도달 등 정상적으로 기록된 실패는 성공을 얻기 위해 재시도하지 않는다.
 
+## 평가 중단과 재개
+
+입력 검증이 끝나 case 평가 루프에 진입한 뒤 Ctrl+C를 누르면 완료된 case JSON을 보존하고
+`state: interrupted`인 부분 보고서를 작성한 후 종료 코드 130으로 끝난다.
+중단된 case는 재개 시 처음부터 평가한다. 보고서 저장 메시지가 나올 때까지 기다린다.
+SIGKILL·전원 차단은 보고서 생성을 보장하지 않지만 확정된 case JSON은 남는다.
+처리 중 예외는 `state: failed` 보고서를 남기며 원래 오류를 다시 발생시킨다.
+입력 검증 실패·손상된 메타데이터처럼 루프 진입 전 오류에는 새 보고서를 보장하지 않는다.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 ws_aic/src/.pixi/envs/default/bin/python3 \
+  scripts/evaluate_triangulation_protocol.py \
+  --capture evidence/triangulation/gpu-full \
+  --output evidence/triangulation/gpu-full-evaluation --device 0 --resume
+```
+
+최신 attempt의 개별 case JSON을 읽으므로 `complete.json`이 없어도 저장된 관측을 평가한다.
+캡처 입력이 바뀐 case는 재평가하고, 동일 입력의 완료 case는 재사용한다.
+`completed`는 선택한 입력 스냅샷 처리가 끝났다는 의미다. 전체 2,700조건 촬영·추정 성공과 다르다.
+전체 계획 / 선택 / 실행 시도 / 보드 관측 / 평가 완료 수를 별도 기록한다.
+보드 관측은 포트 TF 또는 영상 근거다. 개별 카드 entity 수의 독립 측정은 아니므로
+카드 조합 표는 고정 config와 보드 관측 근거를 구분한다. 조명 반복 job과 고유 layout 수도 분리한다.
+`ranges.csv`는 계획·선택·보드 관측 배치의 config 표본 범위이며 실제 측정 위치 범위가 아니다.
+
+기존 평가기가 이미 실행 중이면 업데이트한 중단 처리가 적용되지 않는다.
+구버전 출력에는 `evaluation.json`이 없으므로 새 출력 경로에서 평가해야 한다.
+보고 전용 업그레이드는 알려진 구버전 평가기 해시와 변경되지 않은 `evaluate_case`를 함께 검증해
+기존 캡처 계획을 허용한다. 다른 동결 소스의 불일치는 계속 거부한다.
+이 예외는 평가에만 적용되며 캡처 실행용 계획 생성 규칙은 그대로다.
+
 ## 결과 읽기
 
 - `plan.json`: 100개 배치와 world, 조건, 해시.
@@ -132,7 +164,10 @@ PYTHONDONTWRITEBYTECODE=1 ws_aic/src/.pixi/envs/default/bin/python3 \
 - 같은 attempt 안의 `episode_tracking`·`collector_metadata`는 기존 runner의 완료 감시·metadata이며 학습용 분할 평가 결과가 아니다.
 - `job_NNN/complete.json`: 해당 job의 최신 시도 결과. 파일 존재만으로 성공을 뜻하지 않는다.
 - `capture_summary.json`: 예정·기록·관측 적격 수와 실패 사유.
-- 평가 출력 `summary.json`: 적격 관측을 분모로 한 추정률, 성공 추정의 median/P95/max(mm), 계산 전용 오차.
+- 평가 출력 `summary.json`: 평가 완료된 적격 관측을 분모로 한 추정률, 성공 추정의 median/P95/max(mm), 별도 GT 계산 오차. 미평가 적격 관측은 `pending_eligible_cases`이며 실패가 아니다.
+- `report.html`: 이미지가 내장된 독립 보고서. `overview.png`: 진행량·카드 수별 job·두 오차 누적분포.
+- `cases.csv`, `metrics.csv`, `combinations.csv`, `jobs.csv`, `ranges.csv`: case 상태, 조건별 정확도, 31개 레일 조합, job 상세, config 표본 범위.
+- `evaluation.json`: 모델·계획·선택 case·장치·평가 코드·라이브러리 서명. 동일할 때만 `--resume` 가능.
 - 평가 출력 `*_yolo.png`: 실제 모델이 그린 BBOX·keypoint. GT overlay와 구분한다.
 
 가시성 검사는 포트 평면의 유한 표본 depth 검사다. 포트 전체의 완벽한 비가림 증명은 아니며, 대표 GT overlay와 YOLO 영상을 함께 검토한다.
