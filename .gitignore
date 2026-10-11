@@ -46,3 +46,8 @@ ws_aic/src/build/
 ws_aic/src/install/
 ws_aic/src/log/
 ws_aic/src/phy/data/
+
+# Local triangulation recordings and runtime state
+/evidence/triangulation/**/*.mcap
+/evidence/triangulation/**/collector_metadata/**/labels
+/evidence/triangulation/runtime/
