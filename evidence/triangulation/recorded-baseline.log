@@ -1,0 +1,230 @@
+/home/swlinux/Desktop/workspace/aic-physic/ws_aic/src/.pixi/envs/default/lib/python3.12/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+trial_0000_portoffset_sfp_0000_cards11001_rail4_sfp_port_0: 40 triplets
+trial_0000_portoffset_sfp_0000_cards00101_rail0_sfp_port_0: 40 triplets
+[
+  {
+    "geometry": {
+      "input_frames": 213,
+      "unscorable_frames": 191,
+      "attempts": 22,
+      "estimates": 22,
+      "coverage": 1.0,
+      "failures": {},
+      "median_mm": 1.3679752833470454e-13,
+      "p95_mm": 3.097477655988182e-13,
+      "max_mm": 3.2368285245694687e-13,
+      "within_5mm_all_attempts": 1.0
+    },
+    "original": {
+      "input_frames": 213,
+      "unscorable_frames": 191,
+      "attempts": 22,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 22
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "dark": {
+      "input_frames": 213,
+      "unscorable_frames": 191,
+      "attempts": 22,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 22
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "bright": {
+      "input_frames": 213,
+      "unscorable_frames": 191,
+      "attempts": 22,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 22
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "drop_left": {
+      "input_frames": 213,
+      "unscorable_frames": 191,
+      "attempts": 22,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 22
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "drop_center": {
+      "input_frames": 213,
+      "unscorable_frames": 191,
+      "attempts": 22,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 22
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "drop_right": {
+      "input_frames": 213,
+      "unscorable_frames": 191,
+      "attempts": 22,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 22
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "drop_left_center": {
+      "input_frames": 213,
+      "unscorable_frames": 191,
+      "attempts": 22,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 22
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    }
+  },
+  {
+    "geometry": {
+      "input_frames": 138,
+      "unscorable_frames": 118,
+      "attempts": 20,
+      "estimates": 20,
+      "coverage": 1.0,
+      "failures": {},
+      "median_mm": 1.2660852402060024e-13,
+      "p95_mm": 2.8210276449174687e-13,
+      "max_mm": 3.4219371797089427e-13,
+      "within_5mm_all_attempts": 1.0
+    },
+    "original": {
+      "input_frames": 138,
+      "unscorable_frames": 118,
+      "attempts": 20,
+      "estimates": 5,
+      "coverage": 0.25,
+      "failures": {
+        "fewer_than_two_detections": 15
+      },
+      "median_mm": 0.3355512456465969,
+      "p95_mm": 1.274349324335491,
+      "max_mm": 1.4853885977142078,
+      "within_5mm_all_attempts": 0.25
+    },
+    "dark": {
+      "input_frames": 138,
+      "unscorable_frames": 118,
+      "attempts": 20,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 20
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "bright": {
+      "input_frames": 138,
+      "unscorable_frames": 118,
+      "attempts": 20,
+      "estimates": 2,
+      "coverage": 0.1,
+      "failures": {
+        "fewer_than_two_detections": 18
+      },
+      "median_mm": 0.9639143015760084,
+      "p95_mm": 0.9646443567161789,
+      "max_mm": 0.9647254739539756,
+      "within_5mm_all_attempts": 0.1
+    },
+    "drop_left": {
+      "input_frames": 138,
+      "unscorable_frames": 118,
+      "attempts": 20,
+      "estimates": 5,
+      "coverage": 0.25,
+      "failures": {
+        "fewer_than_two_detections": 15
+      },
+      "median_mm": 0.3355512456465969,
+      "p95_mm": 1.274349324335491,
+      "max_mm": 1.4853885977142078,
+      "within_5mm_all_attempts": 0.25
+    },
+    "drop_center": {
+      "input_frames": 138,
+      "unscorable_frames": 118,
+      "attempts": 20,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 20
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "drop_right": {
+      "input_frames": 138,
+      "unscorable_frames": 118,
+      "attempts": 20,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 20
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    },
+    "drop_left_center": {
+      "input_frames": 138,
+      "unscorable_frames": 118,
+      "attempts": 20,
+      "estimates": 0,
+      "coverage": 0.0,
+      "failures": {
+        "fewer_than_two_detections": 20
+      },
+      "median_mm": null,
+      "p95_mm": null,
+      "max_mm": null,
+      "within_5mm_all_attempts": 0.0
+    }
+  }
+]

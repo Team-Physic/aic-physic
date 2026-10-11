@@ -1,0 +1,19 @@
+{
+  "output": "/home/swlinux/Desktop/workspace/aic-physic/evidence/triangulation/smoke-v3/job_268/attempt_000",
+  "cases": [
+    {
+      "id": "layout_000_l1_d1_a1",
+      "layout_id": "layout_000",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.35,
+      "angle_deg": 0,
+      "target": "SFP_00",
+      "card_count": 1
+    }
+  ],
+  "target": "SFP_00",
+  "card_count": 1,
+  "margin_px": 20,
+  "depth_occlusion_tolerance_m": 0.002
+}

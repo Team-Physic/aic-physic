@@ -1,0 +1,61 @@
+schema_version: 12
+task: img2pos
+version: triangulation-logging-check-v1-268
+sample_unit: synchronized_capture
+input: synchronized_rgb_images
+constants: constants.json
+trials: trials.jsonl
+samples: samples.jsonl
+metadata: metadata.jsonl
+image_layout: images/<split>/<camera>/trial_<index>/*.jpg
+cameras: [left, center, right]
+target:
+  name: correction_xyz
+  definition: port_entrance - plug_reference
+  frame: base_link
+  unit: meter
+  timestamp: capture_stamp
+poses:
+  convention: parent_T_child
+  representation: translation_m + quaternion_xyzw
+  dataset_constants: constants.json#static_transforms
+  trial_constants: trials.jsonl#poses+transforms
+  sample_dynamic: samples.jsonl#poses
+se3_residuals:
+  field: se3_residuals
+  definition: Log(parent_T_child)
+  reference: identity
+  order: [vx_m, vy_m, vz_m, wx_rad, wy_rad, wz_rad]
+  reconstruction_tolerance: 1e-09
+normalization:
+  dataset: camera calibration, static tool transforms, connector geometry
+  trial: scenario, port pose, nominal TCP-to-plug grasp
+  sample: images, dynamic poses, learning residuals, constant deltas
+split:
+  group_by: trial_id
+  validation_ratio: 0.150000
+  test_ratio: 0.150000
+annotations:
+  enabled: true
+  format: yolo_pose
+  layout: annotations/<split>/<camera>/trial_<index>/*.txt
+  class_names: yolo_pose.yaml#names
+  identity_field: samples.jsonl#annotation_instance_ids
+  keypoint_order: [x_min_y_max, x_max_y_max, x_max_y_min, x_min_y_min]
+  keypoint_shape: [4, 3]
+  port_outer_size_mm: {sfp: [16.224, 13.698], sc: [25.781, 9.300]}
+  visibility_source: synchronized_depth_with_rgb_robot_mask
+  depth_image_size_px: [576, 512]
+  depth_update_rate_hz: 5
+  max_depth_rgb_skew_ms: 0
+  minimum_visible_keypoints: 2
+  preserve_fully_occluded: false
+  rgb_robot_mask_fallback: false
+  depth_patch_near_quantile: 0.2
+  occlusion_margin_m: 0.002
+sampling:
+  collection_policy: board-view
+  minimum_clearance_mm: 20
+  optical_distance_mm: [750, 850]
+  lateral_limit_mm: 30
+  angle_limit_rad: 0.261799

@@ -1,0 +1,17 @@
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: SFP_00
+  1: SFP_01
+  2: SFP_10
+  3: SFP_11
+  4: SFP_20
+  5: SFP_21
+  6: SFP_30
+  7: SFP_31
+  8: SFP_40
+  9: SFP_41
+  10: sc_port
+kpt_shape: [4, 3]
+flip_idx: [0, 1, 2, 3]

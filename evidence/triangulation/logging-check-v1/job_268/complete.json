@@ -1,0 +1,16 @@
+{
+  "runner_returncode": 1,
+  "cases": [
+    {
+      "id": "layout_000_l1_d1_a1",
+      "layout_id": "layout_000",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.45,
+      "angle_deg": 0,
+      "target": "SFP_00",
+      "card_count": 1,
+      "status": "not_recorded"
+    }
+  ]
+}

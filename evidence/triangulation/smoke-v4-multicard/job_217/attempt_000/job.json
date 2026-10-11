@@ -1,0 +1,99 @@
+{
+  "output": "/home/swlinux/Desktop/workspace/aic-physic/evidence/triangulation/smoke-v4-multicard/job_217/attempt_000",
+  "cases": [
+    {
+      "id": "layout_088_l1_d2_a0",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.45,
+      "angle_deg": -15,
+      "target": "SFP_20",
+      "card_count": 5
+    },
+    {
+      "id": "layout_088_l1_d2_a1",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.45,
+      "angle_deg": 0,
+      "target": "SFP_20",
+      "card_count": 5
+    },
+    {
+      "id": "layout_088_l1_d2_a2",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.45,
+      "angle_deg": 15,
+      "target": "SFP_20",
+      "card_count": 5
+    },
+    {
+      "id": "layout_088_l1_d1_a0",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.35,
+      "angle_deg": -15,
+      "target": "SFP_20",
+      "card_count": 5
+    },
+    {
+      "id": "layout_088_l1_d1_a1",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.35,
+      "angle_deg": 0,
+      "target": "SFP_20",
+      "card_count": 5
+    },
+    {
+      "id": "layout_088_l1_d1_a2",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.35,
+      "angle_deg": 15,
+      "target": "SFP_20",
+      "card_count": 5
+    },
+    {
+      "id": "layout_088_l1_d0_a0",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.25,
+      "angle_deg": -15,
+      "target": "SFP_20",
+      "card_count": 5
+    },
+    {
+      "id": "layout_088_l1_d0_a1",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.25,
+      "angle_deg": 0,
+      "target": "SFP_20",
+      "card_count": 5
+    },
+    {
+      "id": "layout_088_l1_d0_a2",
+      "layout_id": "layout_088",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.25,
+      "angle_deg": 15,
+      "target": "SFP_20",
+      "card_count": 5
+    }
+  ],
+  "target": "SFP_20",
+  "card_count": 5,
+  "margin_px": 20,
+  "depth_occlusion_tolerance_m": 0.002
+}

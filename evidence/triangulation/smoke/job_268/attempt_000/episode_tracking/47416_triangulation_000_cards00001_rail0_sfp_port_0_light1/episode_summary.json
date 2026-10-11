@@ -1,0 +1,16 @@
+{
+  "task_id": "triangulation_000_cards00001_rail0_sfp_port_0_light1",
+  "success": false,
+  "insertion_success": false,
+  "task_completed_for_engine": true,
+  "status": "ok",
+  "detail": "",
+  "mode": "img2pos",
+  "collection_policy": "board-view",
+  "lift_up_steps": 1,
+  "approach_steps": 0,
+  "collect_steps": 1,
+  "collect_attempts": 1,
+  "haptic_contacts": 0,
+  "clearance_rejections": 0
+}

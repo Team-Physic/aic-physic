@@ -1,0 +1,14 @@
+{
+  "runner_returncode": 130,
+  "cases": [
+    {
+      "id": "layout_000_l1_d1_a1",
+      "layout_id": "layout_000",
+      "light_index": 1,
+      "light_scale": 1,
+      "distance_m": 0.35,
+      "angle_deg": 0,
+      "status": "not_recorded"
+    }
+  ]
+}

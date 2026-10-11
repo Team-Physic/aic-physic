@@ -1,0 +1,20 @@
+{
+  "signature": {
+    "plan_sha256": "8f1d3742fb1de1296e19c849f0d5e0a0d2cb05912b460fcba40c384a7e385a56",
+    "renderer": "software",
+    "smoke": true
+  },
+  "argv": [
+    "scripts/run_triangulation_protocol.py",
+    "run",
+    "--plan",
+    "evidence/triangulation/protocol-smoke-v1/plan.json",
+    "--output",
+    "evidence/triangulation/smoke-v1",
+    "--renderer",
+    "software",
+    "--smoke"
+  ],
+  "python": "3.12.12 | packaged by conda-forge | (main, Jan 26 2026, 23:51:32) [GCC 14.3.0]",
+  "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39"
+}

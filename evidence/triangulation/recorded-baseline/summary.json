@@ -1,0 +1,290 @@
+{
+  "scope": "recorded Gazebo replay; not physical insertion or independent held-out certification",
+  "error_definition": "Euclidean base_link port entrance position error in mm",
+  "geometry_input": "GT-projected corners; excludes detector error",
+  "synthetic_variants": {
+    "dark": "pixel * 0.5",
+    "bright": "pixel * 1.5 clipped",
+    "drop_*": "black entire selected camera image"
+  },
+  "argv": [
+    "scripts/evaluate_triangulation.py",
+    "--bag",
+    "rosbags/portoffset/reid-smoke/20260830T154524-140148-w00-140150/trial_0000_portoffset_sfp_0000_cards11001_rail4_sfp_port_0",
+    "--bag",
+    "rosbags/portoffset/reid-smoke/20260830T155623-148200-w00-148202/trial_0000_portoffset_sfp_0000_cards00101_rail0_sfp_port_0",
+    "--output",
+    "evidence/triangulation/recorded-baseline",
+    "--variants",
+    "original",
+    "dark",
+    "bright",
+    "drop_left",
+    "drop_center",
+    "drop_right",
+    "drop_left_center"
+  ],
+  "model_sha256": "ed559c45049fe0caaf3ed98012fef124474e98c4f7be3feb8e653bc520b45380",
+  "script_sha256": "1380db97e50a2e2688a395695ba0cc29f5e3f9fb491a61b6696162e61dd37364",
+  "torch": "2.7.1+cu126",
+  "opencv": "4.13.0",
+  "production_source_sha256": {
+    "ws_aic/src/phy/phy_policy/phy_policy/ros/final_policy_vision.py": "61e1920615d1a804664cb56ef7a04e619b550acc13a6fac69d862e29ae3c80ab",
+    "ws_aic/src/phy/phy_policy/phy_policy/ros/geometry.py": "00676cc3d621915bace9774afb82d20f1ccf0421b59b4f3b5c8640d07dd123e9",
+    "ws_aic/src/phy/phy_data_collection/phy_data_collection/policy/dataset.py": "75ad20d35b5b58ae5ea52ea1e1a4ecee350c5c6ad276389b41075c8b99f7edb9"
+  },
+  "scenes": [
+    {
+      "bag": "/home/swlinux/Desktop/workspace/aic-physic/rosbags/portoffset/reid-smoke/20260830T154524-140148-w00-140150/trial_0000_portoffset_sfp_0000_cards11001_rail4_sfp_port_0",
+      "target": "SFP_40",
+      "cards_mask": "11001",
+      "counts": {
+        "synchronized_triplets": 213,
+        "evaluated_triplets": 213,
+        "unpaired_images": 0
+      },
+      "gt_frame": "task_board/nic_card_mount_4/sfp_port_0_link_entrance",
+      "inputs": {
+        "/home/swlinux/Desktop/workspace/aic-physic/rosbags/portoffset/reid-smoke/20260830T154524-140148-w00-140150/trial_0000_portoffset_sfp_0000_cards11001_rail4_sfp_port_0/trial_0000_portoffset_sfp_0000_cards11001_rail4_sfp_port_0_0.mcap": "7986bc17a0e64ee4ca430841d0b5c4388101a29e26d5908d44cd243863fc3a09"
+      },
+      "by_variant": {
+        "geometry": {
+          "input_frames": 213,
+          "unscorable_frames": 191,
+          "attempts": 22,
+          "estimates": 22,
+          "coverage": 1.0,
+          "failures": {},
+          "median_mm": 1.3679752833470454e-13,
+          "p95_mm": 3.097477655988182e-13,
+          "max_mm": 3.2368285245694687e-13,
+          "within_5mm_all_attempts": 1.0
+        },
+        "original": {
+          "input_frames": 213,
+          "unscorable_frames": 191,
+          "attempts": 22,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 22
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "dark": {
+          "input_frames": 213,
+          "unscorable_frames": 191,
+          "attempts": 22,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 22
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "bright": {
+          "input_frames": 213,
+          "unscorable_frames": 191,
+          "attempts": 22,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 22
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "drop_left": {
+          "input_frames": 213,
+          "unscorable_frames": 191,
+          "attempts": 22,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 22
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "drop_center": {
+          "input_frames": 213,
+          "unscorable_frames": 191,
+          "attempts": 22,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 22
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "drop_right": {
+          "input_frames": 213,
+          "unscorable_frames": 191,
+          "attempts": 22,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 22
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "drop_left_center": {
+          "input_frames": 213,
+          "unscorable_frames": 191,
+          "attempts": 22,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 22
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        }
+      }
+    },
+    {
+      "bag": "/home/swlinux/Desktop/workspace/aic-physic/rosbags/portoffset/reid-smoke/20260830T155623-148200-w00-148202/trial_0000_portoffset_sfp_0000_cards00101_rail0_sfp_port_0",
+      "target": "SFP_00",
+      "cards_mask": "00101",
+      "counts": {
+        "synchronized_triplets": 138,
+        "evaluated_triplets": 138,
+        "unpaired_images": 2
+      },
+      "gt_frame": "task_board/nic_card_mount_0/sfp_port_0_link_entrance",
+      "inputs": {
+        "/home/swlinux/Desktop/workspace/aic-physic/rosbags/portoffset/reid-smoke/20260830T155623-148200-w00-148202/trial_0000_portoffset_sfp_0000_cards00101_rail0_sfp_port_0/trial_0000_portoffset_sfp_0000_cards00101_rail0_sfp_port_0_0.mcap": "c307648a92cd2c3b6f8bb40e5df91929d56094e358109bca361ef833e6cad484"
+      },
+      "by_variant": {
+        "geometry": {
+          "input_frames": 138,
+          "unscorable_frames": 118,
+          "attempts": 20,
+          "estimates": 20,
+          "coverage": 1.0,
+          "failures": {},
+          "median_mm": 1.2660852402060024e-13,
+          "p95_mm": 2.8210276449174687e-13,
+          "max_mm": 3.4219371797089427e-13,
+          "within_5mm_all_attempts": 1.0
+        },
+        "original": {
+          "input_frames": 138,
+          "unscorable_frames": 118,
+          "attempts": 20,
+          "estimates": 5,
+          "coverage": 0.25,
+          "failures": {
+            "fewer_than_two_detections": 15
+          },
+          "median_mm": 0.3355512456465969,
+          "p95_mm": 1.274349324335491,
+          "max_mm": 1.4853885977142078,
+          "within_5mm_all_attempts": 0.25
+        },
+        "dark": {
+          "input_frames": 138,
+          "unscorable_frames": 118,
+          "attempts": 20,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 20
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "bright": {
+          "input_frames": 138,
+          "unscorable_frames": 118,
+          "attempts": 20,
+          "estimates": 2,
+          "coverage": 0.1,
+          "failures": {
+            "fewer_than_two_detections": 18
+          },
+          "median_mm": 0.9639143015760084,
+          "p95_mm": 0.9646443567161789,
+          "max_mm": 0.9647254739539756,
+          "within_5mm_all_attempts": 0.1
+        },
+        "drop_left": {
+          "input_frames": 138,
+          "unscorable_frames": 118,
+          "attempts": 20,
+          "estimates": 5,
+          "coverage": 0.25,
+          "failures": {
+            "fewer_than_two_detections": 15
+          },
+          "median_mm": 0.3355512456465969,
+          "p95_mm": 1.274349324335491,
+          "max_mm": 1.4853885977142078,
+          "within_5mm_all_attempts": 0.25
+        },
+        "drop_center": {
+          "input_frames": 138,
+          "unscorable_frames": 118,
+          "attempts": 20,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 20
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "drop_right": {
+          "input_frames": 138,
+          "unscorable_frames": 118,
+          "attempts": 20,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 20
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        },
+        "drop_left_center": {
+          "input_frames": 138,
+          "unscorable_frames": 118,
+          "attempts": 20,
+          "estimates": 0,
+          "coverage": 0.0,
+          "failures": {
+            "fewer_than_two_detections": 20
+          },
+          "median_mm": null,
+          "p95_mm": null,
+          "max_mm": null,
+          "within_5mm_all_attempts": 0.0
+        }
+      }
+    }
+  ]
+}

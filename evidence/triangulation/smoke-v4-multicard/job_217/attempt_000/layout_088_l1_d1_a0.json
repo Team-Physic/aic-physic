@@ -1,0 +1,562 @@
+{
+  "id": "layout_088_l1_d1_a0",
+  "layout_id": "layout_088",
+  "light_index": 1,
+  "light_scale": 1,
+  "distance_m": 0.35,
+  "angle_deg": -15,
+  "target": "SFP_20",
+  "card_count": 5,
+  "commanded_base_T_tcp": [
+    [
+      0.9659322441703847,
+      0.0633241394099833,
+      0.2509281830324159,
+      -0.46470646442238084
+    ],
+    [
+      -0.00037925771383397417,
+      -0.9692543747236027,
+      0.2460605885605122,
+      0.2794000042965458
+    ],
+    [
+      0.2587948141589224,
+      -0.23777302295917455,
+      -0.936210037180389,
+      0.29738591142730897
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "gt_base_T_port": [
+    [
+      0.9999928561607553,
+      -0.003779596041187092,
+      -4.7762123051124765e-05,
+      -0.4330373649544001
+    ],
+    [
+      -0.0037798978100468954,
+      -0.9999129425237951,
+      -0.012641983465889864,
+      0.33674375710847504
+    ],
+    [
+      2.3625659196261858e-08,
+      0.012642073689536574,
+      -0.999920085793274,
+      0.1792724048420793
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "gt_stamp_ns": 3204000000,
+  "settle": {
+    "position_error_m": 0.0005529740524363248,
+    "orientation_error_rad": 0.0006892730076776372,
+    "tracking_position_error_m": 0.00175296863927309,
+    "tracking_orientation_error_rad": 0.004771910892070623,
+    "command_position_delta_m": 0.0,
+    "command_orientation_delta_rad": 0.0,
+    "wait_ns": 3211393896,
+    "stable_observations": 3
+  },
+  "command_position_error_m": 0.00175296863927309,
+  "command_angle_error_rad": 0.004771910892036738,
+  "timing": {
+    "clock": "ros",
+    "unit": "nanoseconds",
+    "sync_tolerance_ns": 30000000,
+    "sync_valid": true,
+    "images": {
+      "left": 17800000000,
+      "center": 17800000000,
+      "right": 17800000000
+    },
+    "controller_stamp_ns": 17800000000,
+    "capture_stamp_ns": 17800000000,
+    "skew_ns": {
+      "camera": 0,
+      "controller": 0
+    },
+    "wait_ns": {
+      "observation": 492133485
+    }
+  },
+  "stamp_ns": 17800000000,
+  "visibility": {
+    "left": {
+      "corners_uv": [
+        [
+          623.4352458429996,
+          549.0458628072685
+        ],
+        [
+          646.5086416671606,
+          592.010074278487
+        ],
+        [
+          685.779711538962,
+          566.3170895540392
+        ],
+        [
+          663.6629703229429,
+          523.0089100209111
+        ]
+      ],
+      "inside_margin": true,
+      "visible": false,
+      "reason": "depth_unknown",
+      "depth_checks": [
+        {
+          "expected_depth_m": 0.34836669229839,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3487916451850665,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3492165980717431,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3496415509584196,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3500665038450961,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.35024894499981296,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3506738978864895,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.351098850773166,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3515238036598426,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3519487565465191,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3521311977012359,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.35255615058791245,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.352981103474589,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3534060563612655,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3538310092479421,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.35401345040265886,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3544384032893354,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.35486335617601195,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.35528830906268843,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.355713261949365,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.35589570310408186,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3563206559907584,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.3567456088774349,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.35717056176411144,
+          "observed_depth_m": null
+        },
+        {
+          "expected_depth_m": 0.357595514650788,
+          "observed_depth_m": null
+        }
+      ]
+    },
+    "center": {
+      "corners_uv": [
+        [
+          551.011284163087,
+          536.5955962593002
+        ],
+        [
+          606.474372046183,
+          536.2327608382801
+        ],
+        [
+          606.4205336358781,
+          488.0505876275824
+        ],
+        [
+          550.9553125339509,
+          487.8378962057571
+        ]
+      ],
+      "inside_margin": true,
+      "visible": true,
+      "reason": "visible",
+      "depth_checks": [
+        {
+          "expected_depth_m": 0.3474238644085309,
+          "observed_depth_m": 0.34983548521995544
+        },
+        {
+          "expected_depth_m": 0.3474215309250691,
+          "observed_depth_m": 0.34792786836624146
+        },
+        {
+          "expected_depth_m": 0.3474191974416075,
+          "observed_depth_m": 0.34790945053100586
+        },
+        {
+          "expected_depth_m": 0.34741686395814575,
+          "observed_depth_m": 0.3478894829750061
+        },
+        {
+          "expected_depth_m": 0.34741453047468407,
+          "observed_depth_m": 0.34953364729881287
+        },
+        {
+          "expected_depth_m": 0.3484613320093082,
+          "observed_depth_m": 0.35088324546813965
+        },
+        {
+          "expected_depth_m": 0.34845899852584644,
+          "observed_depth_m": 0.37231746315956116
+        },
+        {
+          "expected_depth_m": 0.34845666504238476,
+          "observed_depth_m": 0.3906930685043335
+        },
+        {
+          "expected_depth_m": 0.348454331558923,
+          "observed_depth_m": 0.39067330956459045
+        },
+        {
+          "expected_depth_m": 0.34845199807546134,
+          "observed_depth_m": 0.35057753324508667
+        },
+        {
+          "expected_depth_m": 0.34949879961008545,
+          "observed_depth_m": 0.35193735361099243
+        },
+        {
+          "expected_depth_m": 0.3494964661266237,
+          "observed_depth_m": 0.35023099184036255
+        },
+        {
+          "expected_depth_m": 0.34949413264316204,
+          "observed_depth_m": 0.3742290735244751
+        },
+        {
+          "expected_depth_m": 0.34949179915970024,
+          "observed_depth_m": 0.3742103576660156
+        },
+        {
+          "expected_depth_m": 0.3494894656762386,
+          "observed_depth_m": 0.35162773728370667
+        },
+        {
+          "expected_depth_m": 0.35053626721086273,
+          "observed_depth_m": 0.3529977798461914
+        },
+        {
+          "expected_depth_m": 0.35053393372740105,
+          "observed_depth_m": 0.35910964012145996
+        },
+        {
+          "expected_depth_m": 0.3505316002439393,
+          "observed_depth_m": 0.3590945899486542
+        },
+        {
+          "expected_depth_m": 0.3505292667604776,
+          "observed_depth_m": 0.3590788245201111
+        },
+        {
+          "expected_depth_m": 0.35052693327701584,
+          "observed_depth_m": 0.3526841700077057
+        },
+        {
+          "expected_depth_m": 0.35157373481164,
+          "observed_depth_m": 0.3540646433830261
+        },
+        {
+          "expected_depth_m": 0.3515714013281784,
+          "observed_depth_m": 0.35389503836631775
+        },
+        {
+          "expected_depth_m": 0.3515690678447166,
+          "observed_depth_m": 0.35384562611579895
+        },
+        {
+          "expected_depth_m": 0.3515667343612549,
+          "observed_depth_m": 0.35379624366760254
+        },
+        {
+          "expected_depth_m": 0.35156440087779317,
+          "observed_depth_m": 0.35374701023101807
+        }
+      ]
+    },
+    "right": {
+      "corners_uv": [
+        [
+          504.28674810551183,
+          590.0271902107861
+        ],
+        [
+          535.1451477661255,
+          541.9641814852855
+        ],
+        [
+          495.2474853409951,
+          516.3203127003356
+        ],
+        [
+          464.4819553316976,
+          564.1149472013811
+        ]
+      ],
+      "inside_margin": true,
+      "visible": true,
+      "reason": "visible",
+      "depth_checks": [
+        {
+          "expected_depth_m": 0.3515132106728849,
+          "observed_depth_m": 0.3539048731327057
+        },
+        {
+          "expected_depth_m": 0.3519398836719996,
+          "observed_depth_m": 0.35416731238365173
+        },
+        {
+          "expected_depth_m": 0.3523665566711143,
+          "observed_depth_m": 0.3543371856212616
+        },
+        {
+          "expected_depth_m": 0.35279322967022897,
+          "observed_depth_m": 0.3549606204032898
+        },
+        {
+          "expected_depth_m": 0.3532199026693437,
+          "observed_depth_m": 0.35535454750061035
+        },
+        {
+          "expected_depth_m": 0.35163766893258075,
+          "observed_depth_m": 0.3540297746658325
+        },
+        {
+          "expected_depth_m": 0.3520643419316955,
+          "observed_depth_m": 0.3980501592159271
+        },
+        {
+          "expected_depth_m": 0.35249101493081025,
+          "observed_depth_m": 0.3796663284301758
+        },
+        {
+          "expected_depth_m": 0.35291768792992495,
+          "observed_depth_m": 0.3585803210735321
+        },
+        {
+          "expected_depth_m": 0.35334436092903965,
+          "observed_depth_m": 0.35547396540641785
+        },
+        {
+          "expected_depth_m": 0.3517621271922768,
+          "observed_depth_m": 0.35415002703666687
+        },
+        {
+          "expected_depth_m": 0.35218880019139154,
+          "observed_depth_m": 0.35294613242149353
+        },
+        {
+          "expected_depth_m": 0.35261547319050623,
+          "observed_depth_m": 0.38026103377342224
+        },
+        {
+          "expected_depth_m": 0.35304214618962093,
+          "observed_depth_m": 0.3591148555278778
+        },
+        {
+          "expected_depth_m": 0.35346881918873574,
+          "observed_depth_m": 0.3555934429168701
+        },
+        {
+          "expected_depth_m": 0.3518865854519727,
+          "observed_depth_m": 0.35426196455955505
+        },
+        {
+          "expected_depth_m": 0.3523132584510874,
+          "observed_depth_m": 0.398575097322464
+        },
+        {
+          "expected_depth_m": 0.35273993145020216,
+          "observed_depth_m": 0.37815725803375244
+        },
+        {
+          "expected_depth_m": 0.3531666044493169,
+          "observed_depth_m": 0.3567729890346527
+        },
+        {
+          "expected_depth_m": 0.3535932774484316,
+          "observed_depth_m": 0.35571300983428955
+        },
+        {
+          "expected_depth_m": 0.3520110437116687,
+          "observed_depth_m": 0.35438770055770874
+        },
+        {
+          "expected_depth_m": 0.3524377167107834,
+          "observed_depth_m": 0.3536754846572876
+        },
+        {
+          "expected_depth_m": 0.3528643897098981,
+          "observed_depth_m": 0.35511550307273865
+        },
+        {
+          "expected_depth_m": 0.3532910627090128,
+          "observed_depth_m": 0.35510700941085815
+        },
+        {
+          "expected_depth_m": 0.3537177357081276,
+          "observed_depth_m": 0.3558776080608368
+        }
+      ]
+    }
+  },
+  "frame_ids": {
+    "left": "left_camera/optical",
+    "center": "center_camera/optical",
+    "right": "right_camera/optical"
+  },
+  "camera_stamps_ns": {
+    "left": 17800000000,
+    "center": 17800000000,
+    "right": 17800000000
+  },
+  "depth_stamps_ns": {
+    "left": 17800000000,
+    "center": 17800000000,
+    "right": 17800000000
+  },
+  "camera_info": {
+    "left": {
+      "width": 1152,
+      "height": 1024,
+      "k": [
+        1236.6316680908203,
+        0.0,
+        576.0,
+        0.0,
+        1236.6314697265625,
+        512.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "d": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "center": {
+      "width": 1152,
+      "height": 1024,
+      "k": [
+        1236.6316680908203,
+        0.0,
+        576.0,
+        0.0,
+        1236.6314697265625,
+        512.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "d": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "right": {
+      "width": 1152,
+      "height": 1024,
+      "k": [
+        1236.6316680908203,
+        0.0,
+        576.0,
+        0.0,
+        1236.6314697265625,
+        512.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "d": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "eligible": true,
+  "actual_center_distance_m": 0.3494950841237308,
+  "actual_angle_deg": -14.95358955206435,
+  "archive": "layout_088_l1_d1_a0.npz",
+  "archive_sha256": "ffbe3690466e1c57ac49c86220362b72fc5c27877770e90db0d4d51c9ae6d5a2",
+  "status": "captured"
+}

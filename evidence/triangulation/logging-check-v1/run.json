@@ -1,0 +1,40 @@
+{
+  "signature": {
+    "plan_sha256": "93e1513f591f0abf3fd01fc4fbb3e77722b0cbcec311bbf601ef8a636b67dd97",
+    "renderer": "gpu",
+    "visualize": false,
+    "smoke": true,
+    "timeout_s": 20.0
+  },
+  "selected_cases": {
+    "268": [
+      {
+        "id": "layout_000_l1_d1_a1",
+        "layout_id": "layout_000",
+        "light_index": 1,
+        "light_scale": 1,
+        "distance_m": 0.45,
+        "angle_deg": 0,
+        "target": "SFP_00",
+        "card_count": 1
+      }
+    ]
+  },
+  "argv": [
+    "scripts/run_triangulation_protocol.py",
+    "run",
+    "--plan",
+    "evidence/triangulation/protocol-logging-check-v1/plan.json",
+    "--output",
+    "evidence/triangulation/logging-check-v1",
+    "--renderer",
+    "gpu",
+    "--smoke",
+    "--timeout-s",
+    "20"
+  ],
+  "python": "3.12.12 | packaged by conda-forge | (main, Jan 26 2026, 23:51:32) [GCC 14.3.0]",
+  "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+  "gpu": "NVIDIA GeForce GTX 1050, 580.173.02, 4096 MiB",
+  "engine_image_id": "sha256:9aa2ffdbb946d38edde1bac7b5f02a44cfbea26e3b04a9c74e09f14c97472923"
+}
